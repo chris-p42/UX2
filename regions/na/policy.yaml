@@ -1,0 +1,27 @@
+region: na                          # Must match the regions/na/ folder name
+
+qos:
+  classes:
+    - name: VOICE
+      bandwidth_percent: 30
+      dscp: 46                      # EF — decimal only; provider rejects PHB keywords
+    - name: BUSINESS_CRITICAL
+      bandwidth_percent: 40
+      dscp: 26                      # AF31
+    - name: DEFAULT
+      bandwidth_percent: 30
+      dscp: 0                       # default/BE
+
+topology:
+  type: hub_and_spoke               # Hub identity from globals.yaml dc_hub — never duplicated here
+
+app_route:
+  sla_classes:
+    - name: REALTIME
+      loss_percent: 1
+      latency_ms: 100
+      jitter_ms: 20
+    - name: TRANSACTIONAL
+      loss_percent: 2
+      latency_ms: 150
+      jitter_ms: 30

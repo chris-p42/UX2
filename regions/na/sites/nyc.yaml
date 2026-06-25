@@ -1,0 +1,106 @@
+# ── Site-specific system overrides ─────────────────────────────────────────
+system:
+  snmp:
+    location: "NYC - 1 Main Street - Floor 3"  # MIB-II sysLocation
+# ───────────────────────────────────────────────────────────────────────────
+
+site_id: 200                        # Globally unique across ALL regions — check all sites/ before assigning
+system_ip_a: 10.0.1.1              # cEdge-A system IP (unique globally in SD-WAN fabric)
+system_ip_b: 10.0.1.2              # cEdge-B system IP
+hostname_a: nyc-cedge-01
+hostname_b: nyc-cedge-02
+chassis_a: "CSR1000V-NYC-A"        # vManage chassis serial / UUID
+chassis_b: "CSR1000V-NYC-B"
+
+# ── WAN transports ──────────────────────────────────────────────────────────
+# Variant A — full branch: dual internet + MPLS + TLOC-EXT → 4 TLOCs per cEdge
+transports:
+  custom1:                          # ISP-A — DHCP; color key is immutable once deployed
+    interface: GigabitEthernet2
+    dhcp: true
+  custom2:                          # ISP-B — DHCP
+    interface: GigabitEthernet3
+    dhcp: true
+  private1:                         # Own MPLS circuit; OSPF underlay toward PE router
+    interface: GigabitEthernet4
+    ip: 192.168.1.1
+    mask: 255.255.255.252
+    ospf:
+      area: 0                       # OSPF area integer; no gateway — OSPF handles routing
+
+# ── TLOC extension ──────────────────────────────────────────────────────────
+# Shares one physical port (GigabitEthernet5) with two sub-interfaces:
+#   .101 — extends own private1 to peer (peer advertises it as private2)
+#   .102 — receives peer's private1 (locally advertised as private2)
+tloc_ext:
+  port: GigabitEthernet5            # Shared physical port for TLOC-EXT cross-connect
+  sub_if_extend:
+    sub_interface: GigabitEthernet5.101
+    vlan: 101                       # VLAN for outbound TLOC-EXT to peer
+  sub_if_receive:
+    sub_interface: GigabitEthernet5.102
+    vlan: 102                       # VLAN for inbound TLOC-EXT from peer
+
+# ── CLI add-on ───────────────────────────────────────────────────────────────
+cli_addon: ~                        # Branch site — no port-channel; zero CLI add-on resources
+
+# ── Route-maps ───────────────────────────────────────────────────────────────
+route_maps: {}                      # No named route-map policies at this site
+
+# ── Service VPNs ────────────────────────────────────────────────────────────
+service_vpns:
+  - vpn: 0
+    name: TRANSPORT                 # VPN 0 is transport underlay only; no campus interface
+
+  - vpn: 10
+    name: LAN
+    campus_interface:
+      port: GigabitEthernet6        # Physical trunk port toward campus L3 switch
+      vrfs:
+        - name: CORP                # Corporate VRF — two VLANs; one per cEdge
+          cedge_a:
+            vlan: 3110              # cEdge-A VLAN → dedicated SVI on campus switch (VRF CORP)
+            ip: 10.10.1.1
+            mask: 255.255.255.252
+            bgp:                    # BGP campus peering; ~ for OSPF sites
+              neighbor_ip: 10.10.1.2  # Campus switch SVI IP for VLAN 3110
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~                 # BGP site — OSPF is null
+          cedge_b:
+            vlan: 3111              # cEdge-B VLAN — DIFFERENT from cEdge-A for same VRF
+            ip: 10.10.2.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.10.2.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          redistribute_omp: true    # OMP → campus BGP (per VRF, not per cEdge)
+
+        - name: INFRA               # Infrastructure VRF
+          cedge_a:
+            vlan: 3120
+            ip: 10.20.1.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.20.1.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          cedge_b:
+            vlan: 3121
+            ip: 10.20.2.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.20.2.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          redistribute_omp: true
+
+# ── OMP advertisement ────────────────────────────────────────────────────────
+omp_advertise_bgp: true             # Campus → OMP; device-wide; maps to sdwan_system_omp_feature.advertise_ipv4_bgp
+
+# ── Policy override ──────────────────────────────────────────────────────────
+policy_override: ~                  # NYC uses NA regional baseline policy

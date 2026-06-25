@@ -1,0 +1,124 @@
+# ── Site-specific system overrides ─────────────────────────────────────────
+system:
+  snmp:
+    location: "DC Hub - Main Data Center - Server Room A"  # MIB-II sysLocation
+    contact: "noc@acme.corp"
+# ───────────────────────────────────────────────────────────────────────────
+
+site_id: 100                        # DC hub — site_id is globally unique; matches globals.yaml dc_hub.site_id
+system_ip_a: 10.0.0.1              # cEdge-A system IP — same as globals.yaml dc_hub.system_ip_a
+system_ip_b: 10.0.0.2              # cEdge-B system IP — same as globals.yaml dc_hub.system_ip_b
+hostname_a: dc-hub-cedge-01
+hostname_b: dc-hub-cedge-02
+chassis_a: "CSR1000V-DC-HUB-A"    # Device chassis serial or UUID
+chassis_b: "CSR1000V-DC-HUB-B"
+
+# ── WAN transports ──────────────────────────────────────────────────────────
+transports:
+  custom1:                          # ISP-A — DHCP
+    interface: GigabitEthernet2
+    dhcp: true
+  custom2:                          # ISP-B — DHCP
+    interface: GigabitEthernet3
+    dhcp: true
+  private1:                         # MPLS — upstream fusion router; OSPF underlay toward PE
+    interface: GigabitEthernet4
+    ip: 192.168.0.1
+    mask: 255.255.255.252
+    ospf:
+      area: 0                       # OSPF area integer — no gateway; OSPF handles routing
+
+# ── TLOC extension ──────────────────────────────────────────────────────────
+tloc_ext: ~                         # DC hub: fusion router provides MPLS redundancy upstream;
+                                    # each cEdge reaches MPLS directly — no peer to extend to.
+                                    # DC hub advertises 3 TLOCs: custom1, custom2, private1.
+                                    # private2 does NOT exist at the DC. This is intentional.
+
+# ── CLI add-on (port-channel campus peering) ────────────────────────────────
+cli_addon:
+  port_channel:
+    id: 10                          # Logical interface: Port-channel10
+    mode: active                    # LACP mode: active | passive | on
+    members:
+      - TenGigabitEthernet0/0/0    # LAG physical members
+      - TenGigabitEthernet0/0/1
+  campus_ospf:
+    process_id: 10                  # ip ospf <process_id> area 0
+    cost: 100                       # ip ospf cost — same both cEdges
+    md5_key_id: 7                   # ip ospf message-digest-key <id> md5 ...
+    # MD5 secret: var.ospf_md5_secret (sensitive Terraform variable) — never in YAML
+  pim:
+    dr_priority_a: 10               # cEdge-A wins PIM DR election
+    dr_priority_b: 1                # cEdge-B is backup DR
+    rp_address: 10.99.9.254         # ip pim vrf 10 rp-address
+  private_interface:
+    speed_config: "no negotiation auto"  # Injected under transports.private1.interface
+  bgp:
+    as_number: "65000"              # MUST match globals.yaml.sdwan_as in IOS-XE notation;
+                                    # mismatch creates a second BGP process (fall-over bfd breaks)
+  buf_filter:
+    host_a: 10.99.14.3              # BUF-FILTER ACL endpoints (promoted from UX1 hardcoded values)
+    host_b: 10.22.108.4
+  pnp_startup_vlan: 62              # PnP startup VLAN (promoted from UX1 hardcoded value)
+
+# ── Route-maps ──────────────────────────────────────────────────────────────
+route_maps: {}                      # No named route-map policies at this site
+
+# ── Service VPNs ────────────────────────────────────────────────────────────
+service_vpns:
+  - vpn: 0
+    name: TRANSPORT                 # Transport underlay only — no campus interface, no BGP
+
+  - vpn: 10
+    name: LAN
+    campus_interface:
+      port: Port-channel10          # Derived from cli_addon.port_channel.id — NOT a physical interface
+      vrfs:
+        - name: CORP                # Corporate VRF campus peering
+          cedge_a:
+            vlan: 3110              # cEdge-A VLAN → unique SVI on campus switch (VRF CORP)
+            ip: 10.10.0.1
+            mask: 255.255.255.252
+            bgp:                    # BGP toward campus L3 switch; ~ for OSPF sites
+              neighbor_ip: 10.10.0.2  # Campus switch SVI IP for VLAN 3110
+              route_map_in: ~       # No inbound policy at this site
+              route_map_out: ~      # No outbound policy at this site
+            ospf: ~                 # BGP site — OSPF sub-block is null
+          cedge_b:
+            vlan: 3111              # cEdge-B uses different VLAN for same VRF (different campus SVI)
+            ip: 10.10.1.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.10.1.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          redistribute_omp: true    # OMP → campus BGP (per VRF, not per cEdge)
+
+        - name: INFRA               # Infrastructure VRF campus peering
+          cedge_a:
+            vlan: 3120              # cEdge-A VLAN → unique SVI on campus switch (VRF INFRA)
+            ip: 10.20.0.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.20.0.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          cedge_b:
+            vlan: 3121
+            ip: 10.20.1.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.20.1.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          redistribute_omp: true
+
+# ── OMP advertisement ────────────────────────────────────────────────────────
+omp_advertise_bgp: true             # Campus → OMP direction; device-wide, both cEdges identically
+                                    # Maps to sdwan_system_omp_feature.advertise_ipv4_bgp
+
+# ── Policy override ──────────────────────────────────────────────────────────
+policy_override: ~                  # DC hub uses regional baseline policy only

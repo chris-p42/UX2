@@ -1,0 +1,10 @@
+tacacs:
+  servers:
+    - address: 10.1.1.1
+      port: 49
+    - address: 10.1.1.2
+      port: 49
+  auth_order:
+    - tacacs
+    - local
+  # key/secret: sensitive Terraform variable — never in YAML

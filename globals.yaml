@@ -1,0 +1,8 @@
+org_name: acme-corp
+vmanage_url: https://vmanage.acme.corp
+sdwan_as: 65000                     # Uniform SD-WAN AS — every site, every region
+campus_as: 65100                    # Uniform campus AS — every site, every region
+dc_hub:                             # Read-only reference for regional topology policies
+  site_id: 100                      # NOT a managed resource outside regions/dc-hub/
+  system_ip_a: 10.0.0.1
+  system_ip_b: 10.0.0.2

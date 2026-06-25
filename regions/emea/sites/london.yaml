@@ -1,0 +1,81 @@
+# ── Site-specific system overrides ─────────────────────────────────────────
+system:
+  snmp:
+    location: "London - 30 St Mary Axe - Floor 12"
+# ───────────────────────────────────────────────────────────────────────────
+
+site_id: 301                        # Globally unique
+system_ip_a: 10.1.1.1
+system_ip_b: 10.1.1.2
+hostname_a: lon-cedge-01
+hostname_b: lon-cedge-02
+chassis_a: "CSR1000V-LON-A"
+chassis_b: "CSR1000V-LON-B"
+
+# ── WAN transports ──────────────────────────────────────────────────────────
+# Variant B — internet-only: dual internet, no MPLS → 2 TLOCs per cEdge
+transports:
+  custom1:
+    interface: GigabitEthernet2
+    dhcp: true
+  custom2:
+    interface: GigabitEthernet3
+    dhcp: true
+
+tloc_ext: ~                         # No MPLS — no TLOC-EXT
+cli_addon: ~
+
+route_maps: {}
+
+service_vpns:
+  - vpn: 0
+    name: TRANSPORT
+
+  - vpn: 10
+    name: LAN
+    campus_interface:
+      port: GigabitEthernet6
+      vrfs:
+        - name: CORP
+          cedge_a:
+            vlan: 3110
+            ip: 10.10.15.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.10.15.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          cedge_b:
+            vlan: 3111
+            ip: 10.10.16.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.10.16.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          redistribute_omp: true
+        - name: INFRA
+          cedge_a:
+            vlan: 3120
+            ip: 10.20.15.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.20.15.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          cedge_b:
+            vlan: 3121
+            ip: 10.20.16.1
+            mask: 255.255.255.252
+            bgp:
+              neighbor_ip: 10.20.16.2
+              route_map_in: ~
+              route_map_out: ~
+            ospf: ~
+          redistribute_omp: true
+
+omp_advertise_bgp: true
+policy_override: ~
