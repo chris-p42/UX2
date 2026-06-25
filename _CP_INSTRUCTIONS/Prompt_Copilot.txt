@@ -1,0 +1,202 @@
+Read the following instruction files before doing anything else:
+  - copilot-instructions.md       (project overview, provider, schemas, hard rules)
+  - modules.instructions.md       (module authoring rules, resource types, BGP split, TLOC-EXT)
+  - sites.instructions.md         (site YAML schema and authoring rules)
+  - regions.instructions.md       (region stack layout, main.tf pattern, policy.yaml schema)
+
+These files are the authoritative specification. Every decision you make must be
+traceable back to a rule in one of them. If a rule conflicts with something you
+know from training data, the instruction file wins.
+
+---
+
+TASK: Build the complete SD-WAN Network-as-Code repository from scratch.
+
+The target layout is:
+
+  sdwan-nac/
+  ├── globals.yaml
+  ├── .gitignore
+  ├── common/
+  │   ├── aaa.yaml
+  │   ├── ntp.yaml
+  │   ├── banner.yaml
+  │   ├── snmp.yaml
+  │   └── logging.yaml
+  ├── modules/
+  │   ├── config-group/
+  │   ├── transport/
+  │   ├── tloc-ext/
+  │   ├── cli-addon/
+  │   ├── service/
+  │   ├── system-profile/
+  │   ├── policy-group/
+  │   ├── policy-override/
+  │   └── site/
+  └── regions/
+      ├── dc-hub/       (sites/dc-hub.yaml + policy.yaml + combined main.tf stack)
+      ├── na/
+      │   ├── policy/   (isolated stack — outputs policy_id)
+      │   ├── nyc/      (isolated site stack)
+      │   ├── chicago/  (isolated site stack)
+      │   ├── sites/    (nyc.yaml, chicago.yaml — YAML only, not TF roots)
+      │   └── policy.yaml
+      └── emea/
+          ├── policy/
+          ├── paris/
+          ├── london/
+          ├── sites/    (paris.yaml, london.yaml)
+          └── policy.yaml
+
+---
+
+BUILD ORDER — follow this sequence exactly:
+
+1. globals.yaml, common/*.yaml (all five files), and .gitignore at repo root.
+
+2. modules/config-group/   — sdwan_configuration_group resource.
+3. modules/transport/      — for_each over var.site_cfg.transports (color-keyed map);
+                             one sdwan_transport_wan_vpn_interface_ethernet_feature per entry;
+                             branch on routing method per entry:
+                               - dhcp: true → DHCP interface (custom1, custom2)
+                               - ospf block present → static IP on interface + one
+                                 sdwan_transport_routing_ospf_feature per transport
+                                 profile (private1 underlay in this design)
+                               - neither → static ip/mask/gateway
+                             VPN 0 is transport underlay only — no campus BGP, no
+                             sdwan_transport_routing_bgp_feature.
+4. modules/tloc-ext/       — two TLOC-EXT parcels (sub_if_extend, sub_if_receive);
+                             conditional on var.site_cfg.tloc_ext != null.
+4b. modules/cli-addon/     — one sdwan_cli_feature_profile containing TWO
+                             sdwan_cli_config_feature resources:
+                               "port_channel": LAG member channel-group config +
+                                 Port-channel base + sub-interfaces per VRF
+                                 (dot1Q, VRF, IP, OSPF P2P with MD5, PIM DR);
+                               "supplemental": VLAN SVI PIM config, BFD template
+                                 single-hop bfd1 (500/500/3) applied to SVIs,
+                                 BGP fall-over bfd (EXTENDS native BGP session —
+                                 as_number MUST match globals.yaml.sdwan_as),
+                                 BUF-FILTER ACL, pnp startup-vlan;
+                             conditional on var.site_cfg.cli_addon != null;
+                             CLI uses TWO-STAGE substitution: ${...} via Terraform
+                             templatestring() for site-wide values; {{variable_name}}
+                             for vManage device variables (per-device at push time);
+                             device variables: {{cli_vlan_corp}}, {{cli_ip_corp}},
+                             {{cli_mask_corp}}, {{cli_vlan_infra}}, {{cli_ip_infra}},
+                             {{cli_mask_infra}}, {{cli_pim_dr_priority}},
+                             {{cli_ospf_md5_secret}} (sensitive — device variable only,
+                             never embedded by Terraform), {{cli_bgp_neighbor_corp}},
+                             {{cli_bgp_neighbor_infra}};
+                             SVI names derived inline: Vlan{{cli_vlan_corp}};
+                             private interface name reused from transports.private1.interface;
+                             NEVER use sdwan_cli_template_feature_template or
+                             sdwan_cli_device_template — those are UX1;
+                             see dc-hub_cli_addon_portchannel.txt and
+                             dc-hub_cli_addon_supplemental.txt for full CLI templates.
+5. modules/service/        — sdwan_service_lan_vpn_feature for VPN 10+ only (never VPN 0);
+                             campus peering protocol is BGP or OSPF per cEdge — each cedge_a/cedge_b
+                             block has exactly one non-null sub-block: bgp (with neighbor_ip,
+                             route_map_in, route_map_out) or ospf (with area); the other is ~;
+                             flatten service_vpns → campus_interface.vrfs → ["cedge_a","cedge_b"]
+                             into a single for_each map; split into bgp_peers and ospf_peers by
+                             filtering on cedge.bgp != null / cedge.ospf != null;
+                             CRITICAL: port lives at campus_interface level, NOT inside the vrf
+                             object (vrf only has name/cedge_a/cedge_b/redistribute_omp) — carry it
+                             explicitly as port = vpn.campus_interface.port in each flat map entry
+                             and reference it as each.value.port; never write each.value.vrf.port
+                             (always fails); interface_name = "${each.value.port}.${each.value.cedge.vlan}";
+                             neighbor_ip/route_map fields are at each.value.cedge.bgp.*, never flat;
+                             sdwan_service_routing_bgp_feature for bgp_peers (for_each = local.bgp_peers);
+                             sdwan_service_routing_ospf_feature for ospf_peers (for_each = local.ospf_peers);
+                             redistribute_omp per VRF (not per cEdge), applied to whichever feature type;
+                             route_map_in/route_map_out for BGP only, resolved by name from the
+                             site_cfg.route_maps library (one sdwan_service_route_policy_feature
+                             per named entry with at least one non-null field);
+                             BGP neighbor description max 32 chars: substr("${var.site_name} ${each.key}", 0, 32).
+6. modules/system-profile/ — system parcels for both cEdges: sdwan_system_aaa_feature,
+                             sdwan_system_ntp_feature, sdwan_system_banner_feature,
+                             sdwan_system_snmp_feature, sdwan_system_logging_feature;
+                             accepts var.common (map of common/*.yaml contents) and
+                             var.system_overrides (site YAML system: block, may be null);
+                             deep-merges common values with site overrides (site wins);
+                             TACACS key/secret comes from sensitive Terraform variable,
+                             never from YAML.
+7. modules/policy-group/   — sdwan_centralized_policy (hub-and-spoke topology from var.dc_hub),
+                             QoS classes, sdwan_application_aware_routing_policy_definition;
+                             instantiated ONCE per region in the policy/ sub-stack.
+8. modules/policy-override/ — additive per-branch parcels; instantiated only when
+                              site_cfg.policy_override != null.
+9. modules/site/           — composes all of the above; routes service_vpns entries:
+                             vpn == 0 → modules/transport, vpn >= 1 → modules/service;
+                             instantiates modules/tloc-ext only when tloc_ext != null;
+                             instantiates modules/cli-addon only when cli_addon != null;
+                             service resources whose interface_name references
+                             Port-channel<id> must depends_on = [module.cli_addon];
+                             sets sdwan_system_omp_feature.advertise_ipv4_bgp from
+                             var.site_cfg.omp_advertise_bgp (device-wide, both cEdges);
+                             DEVICE ATTACH variables map: one entry per cEdge; ALL
+                             variables go in the SAME map — pseudo_commit_timer + native
+                             parcel vars + CLI add-on vars; all values are strings
+                             (tostring() on integers); when cli_addon != null, add:
+                               cli_vlan_corp/infra, cli_ip_corp/infra, cli_mask_corp/infra
+                               (from cedge_a/b.vlan/ip/mask per device),
+                               cli_pim_dr_priority (dr_priority_a for cEdge-A,
+                               dr_priority_b for cEdge-B),
+                               cli_ospf_md5_secret (from var.ospf_md5_secret, sensitive,
+                               NEVER interpolated into cli string — device variable only),
+                               cli_bgp_neighbor_corp/infra (from cedge_a/b.bgp.neighbor_ip);
+                             see modules.instructions.md "Wiring device variables" for
+                             the exact map structure;
+                             every device attach includes pseudo_commit_timer = 300.
+
+10. regions/dc-hub/        — single combined stack (policy + dc-hub site together);
+                             same main.tf pattern as before with for_each over sites/.
+11. regions/na/policy/     — policy sub-stack only; instantiates modules/policy-group;
+                             outputs policy_id; apply this FIRST before any site stack.
+12. regions/na/nyc/        — site sub-stack; reads ../sites/nyc.yaml; reads policy_id
+                             via terraform_remote_state from ../policy/terraform.tfstate;
+                             loads all five common/*.yaml files into local.common;
+                             passes common and site_cfg.system to modules/system-profile.
+13. regions/na/chicago/    — same pattern as nyc/.
+14. regions/emea/policy/   — same as na/policy/ for EMEA.
+15. regions/emea/paris/ and regions/emea/london/ — same pattern as na site stacks.
+
+---
+
+VALIDATION CHECKPOINTS — after completing each module and after each stack:
+
+  Run from inside each sub-stack directory (policy/ and each site/):
+    terraform init -upgrade
+    terraform validate
+
+  Show me the full output of terraform validate before moving to the next step.
+  Do NOT run terraform plan or terraform apply — stop at validate.
+
+  After all stacks pass validate, show me:
+    - modules/transport/main.tf
+    - modules/system-profile/main.tf
+    - modules/site/main.tf
+    - regions/dc-hub/sites/dc-hub.yaml
+    - regions/dc-hub/main.tf
+    - regions/na/policy/main.tf
+    - regions/na/nyc/main.tf
+
+---
+
+HARD CONSTRAINTS — these are non-negotiable:
+
+  - Provider: CiscoDevNet/sdwan only. Never use netascode/sdwan.
+  - UX2 only: never create sdwan_feature_template or any UX1 resource.
+  - No count — always for_each with meaningful keys.
+  - No root-level main.tf spanning multiple regions.
+  - No shared backend — local backend, one tfstate per region.
+  - DSCP values are always decimal integers (EF=46, AF31=26, BE=0) — never PHB keywords.
+  - VPN 0 is transport-side only — no campus BGP, no sdwan_transport_routing_bgp_feature,
+    never routed to modules/service (sdwan_service_lan_vpn_feature rejects VPN 0).
+  - Never put omp_advertise_bgp inside a service_vpns or VRF entry — it is top-level, device-wide.
+  - tloc_ext: ~ on dc-hub.yaml and any site without TLOC extension — zero TLOC-EXT resources,
+    never a disabled placeholder port.
+  - transport map keys (custom1, custom2, private1) are immutable state addresses —
+    never rename them on a deployed site.
+  - Every device attach must include pseudo_commit_timer = 300.
+  - Never run terraform apply autonomously — always stop and show the plan first.

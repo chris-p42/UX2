@@ -1,0 +1,148 @@
+# DC hub CLI add-on #1 — port-channel campus peering
+# =====================================================
+# sdwan_cli_config_feature "port_channel" inside sdwan_cli_feature_profile
+#
+# Covers: physical member channel-group config + Port-channel base interface
+#         + sub-interfaces per VRF (IP, VRF, OSPF, PIM)
+#
+# TWO-STAGE SUBSTITUTION
+# ─────────────────────
+# ${...}  = Terraform templatestring() — resolved before storing in vManage;
+#           same value for every device at this site.
+# {{...}} = vManage device variable — resolved per device at push time;
+#           different for cEdge-A vs cEdge-B.
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 1. YAML — dc-hub.yaml cli_addon block (port-channel fields)
+# ──────────────────────────────────────────────────────────────────────────
+#
+# cli_addon:
+#   port_channel:
+#     id: 10                          # → Port-channel10
+#     mode: active                    # LACP mode: active | passive | on
+#     members:
+#       - TenGigabitEthernet0/0/0
+#       - TenGigabitEthernet0/0/1
+#   campus_ospf:
+#     process_id: 10                  # ip ospf <process_id> area 0
+#     cost: 100                       # ip ospf cost — same both cEdges
+#     md5_key_id: 7                   # ip ospf message-digest-key <id> md5 ...
+#     # MD5 secret: NOT in YAML — sensitive Terraform variable var.ospf_md5_secret
+#   pim:
+#     dr_priority_a: 10               # cEdge-A wins DR election
+#     dr_priority_b: 1                # cEdge-B is backup DR
+#
+# campus_interface.port in service_vpns VPN 10:
+#   port: Port-channel10              # matches port_channel.id above
+#
+# VLAN, IP, mask are NOT duplicated here — already in
+# service_vpns[10].campus_interface.vrfs[*].cedge_a/b and passed as
+# vManage device variables at attach time.
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 2. VMANAGE DEVICE VARIABLES
+# ──────────────────────────────────────────────────────────────────────────
+#
+# Variable name           | cEdge-A source                          | cEdge-B source
+# ──────────────────────────────────────────────────────────────────────────────────
+# {{cli_vlan_corp}}       | vrfs[CORP].cedge_a.vlan                 | vrfs[CORP].cedge_b.vlan
+# {{cli_ip_corp}}         | vrfs[CORP].cedge_a.ip                   | vrfs[CORP].cedge_b.ip
+# {{cli_mask_corp}}       | vrfs[CORP].cedge_a.mask                 | vrfs[CORP].cedge_b.mask
+# {{cli_vlan_infra}}      | vrfs[INFRA].cedge_a.vlan                | vrfs[INFRA].cedge_b.vlan
+# {{cli_ip_infra}}        | vrfs[INFRA].cedge_a.ip                  | vrfs[INFRA].cedge_b.ip
+# {{cli_mask_infra}}      | vrfs[INFRA].cedge_a.mask                | vrfs[INFRA].cedge_b.mask
+# {{cli_pim_dr_priority}} | cli_addon.pim.dr_priority_a             | cli_addon.pim.dr_priority_b
+# {{cli_ospf_md5_secret}} | var.ospf_md5_secret (sensitive)         | same value both cEdges
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 3. CLI TEMPLATE
+# ──────────────────────────────────────────────────────────────────────────
+
+<<-EOT
+%{for member in var.cli_addon.port_channel.members~}
+interface ${member}
+ no ip address
+ no negotiation auto
+ channel-group ${var.cli_addon.port_channel.id} mode ${var.cli_addon.port_channel.mode}
+ no shutdown
+!
+%{endfor~}
+interface Port-channel${var.cli_addon.port_channel.id}
+!
+interface Port-channel${var.cli_addon.port_channel.id}.{{cli_vlan_corp}}
+ encapsulation dot1Q {{cli_vlan_corp}}
+ vrf forwarding 10
+ ip address {{cli_ip_corp}} {{cli_mask_corp}}
+ ip ospf ${var.cli_addon.campus_ospf.process_id} area 0
+ ip ospf network point-to-point
+ ip ospf cost ${var.cli_addon.campus_ospf.cost}
+ ip ospf dead-interval 20
+ ip ospf hello-interval 5
+ ip ospf retransmit-interval 5
+ ip ospf authentication message-digest
+ ip ospf message-digest-key ${var.cli_addon.campus_ospf.md5_key_id} md5 {{cli_ospf_md5_secret}}
+ ip pim sparse-mode
+ ip pim dr-priority {{cli_pim_dr_priority}}
+ no shutdown
+!
+interface Port-channel${var.cli_addon.port_channel.id}.{{cli_vlan_infra}}
+ encapsulation dot1Q {{cli_vlan_infra}}
+ vrf forwarding 10
+ ip address {{cli_ip_infra}} {{cli_mask_infra}}
+ ip ospf ${var.cli_addon.campus_ospf.process_id} area 0
+ ip ospf network point-to-point
+ ip ospf cost ${var.cli_addon.campus_ospf.cost}
+ ip ospf dead-interval 20
+ ip ospf hello-interval 5
+ ip ospf retransmit-interval 5
+ ip ospf authentication message-digest
+ ip ospf message-digest-key ${var.cli_addon.campus_ospf.md5_key_id} md5 {{cli_ospf_md5_secret}}
+ ip pim sparse-mode
+ ip pim dr-priority {{cli_pim_dr_priority}}
+ no shutdown
+!
+EOT
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 4. HARDCODED VALUES — rationale
+# ──────────────────────────────────────────────────────────────────────────
+#
+# vrf forwarding 10             — always VPN 10
+# ip ospf network point-to-point — always P2P toward campus switch
+# ip ospf dead-interval 20      — org-wide timer
+# ip ospf hello-interval 5      — org-wide timer
+# ip ospf retransmit-interval 5 — org-wide timer
+# ip ospf authentication message-digest — fixed auth type org-wide
+# ip pim sparse-mode            — always PIM-SM
+# no ip address (members)       — members carry no L3 config
+# no negotiation auto (members) — always for TenGigabitEthernet
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# 5. TERRAFORM RESOURCE SKETCH
+# ──────────────────────────────────────────────────────────────────────────
+
+# resource "sdwan_cli_feature_profile" "this" {
+#   name        = "${var.site_name}-cli-addon"
+#   description = "CLI add-on parcels — DC hub"
+# }
+#
+# resource "sdwan_cli_config_feature" "port_channel" {
+#   name               = "${var.site_name}-portchannel"
+#   feature_profile_id = sdwan_cli_feature_profile.this.id
+#   cli = templatestring(<<-EOT
+#     ... (section 3 above) ...
+#     EOT
+#     , {
+#       cli_addon = var.cli_addon
+#     }
+#   )
+# }
+#
+# var.ospf_md5_secret: sensitive = true in variables.tf; passed as
+# {{cli_ospf_md5_secret}} device variable at attach time — never embedded
+# by Terraform to avoid storing plaintext in the vManage database.
