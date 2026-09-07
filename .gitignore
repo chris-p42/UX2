@@ -1,4 +1,24 @@
-terraform.tfvars
+# .gitignore — enforces the CLAUDE.md hard rules: never commit state,
+# credentials, or generated output.
+
+# Generated per-site Terraform roots — rebuild any time with generate.py.
+# This also keeps the live terraform.tfstate / apply logs (real chassis
+# serials, internal IPs) out of git.
+sites/
+
+# Terraform state and working dirs, wherever they appear
 *.tfstate
-*.tfstate.backup
+*.tfstate.*
 .terraform/
+.terraform.lock.hcl
+
+# Credentials / local variable files
+terraform.tfvars
+*.auto.tfvars
+
+# Staging output from csv_to_values.py (write to values/ only with --force)
+values.generated/
+
+# Editor / OS noise
+.vs/
+__pycache__/

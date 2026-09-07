@@ -1,0 +1,379 @@
+# values/aar/cml.yaml - traffic policy complete pour CML
+#
+# UN SEUL parcel traffic policy par site. Voir values/aar/_README.md.
+#
+# POURQUOI UNE SEULE POLICY (et non AAR + QOSCLASS separees) - etabli le
+# 2026-09-04 par un apply reel depuis sites/bxt:
+#   PPARC0008 "Multiple traffic policies cannot be added for same vpn and same
+#   direction:{ 10,all } for traffic policy QOSCLASS-BXT and AAR-BXT"
+# vManage accepte plusieurs traffic policies dans un profil, mais pas deux qui
+# se recouvrent sur (VPN, direction) - et `all` englobe `service`. Les deux
+# policies UX1 (data policy direction all + LO_AAR direction service) sont donc
+# fusionnees ici en une seule, direction `all` (choix confirme 2026-09-04).
+#
+# COMMENT LA FUSION EST CONSTRUITE - reproduction stricte d'UX1 demandee.
+# En UX1 les deux policies s'appliquent INDEPENDAMMENT au meme paquet: il prend
+# la 1re sequence qui matche dans la data policy (marquage DSCP + forwarding
+# class + local-tloc) ET la 1re qui matche dans LO_AAR (SLA + couleurs).
+# Ici une seule sequence matche, donc chaque sequence porte l'UNION des actions
+# que les deux policies UX1 auraient appliquees a ce trafic. Le module
+# l'autorise: sla_class et dscp/forwarding_class/local_tloc coexistent dans un
+# meme bloc actions (sdwan_features_application_priority.tf).
+#
+# Ordre: l'ossature est celle de la data policy UX1 (DSCP, puis applications,
+# puis prefixes/ports, puis defaut). Les deux policies UX1 ordonnent le DSCP en
+# premier, donc cet ordre reproduit fidelement les deux dimensions.
+# Les sequences en fin de liste (avant le defaut) sont les matchs que SEUL
+# LO_AAR portait et qu'aucune sequence data policy ne couvrait: elles recoivent
+# la forwarding class que le defaut UX1 leur aurait donnee (LO_BESTEFFORT) plus
+# leur SLA.
+#
+# LIMITE CONNUE - une divergence residuelle, enumerable:
+#   deux policies "first-match" independantes ne se reproduisent pas exactement
+#   par une seule sans partitionner le produit des deux. Le seul cas perdu ici
+#   est DSCP 32: LO_AAR lui donne LO_SLA_VIDEO, mais aucune sequence data policy
+#   ne matche 32. Sa sequence est donc placee en fin de liste, ce qui fait
+#   qu'un paquet DSCP 32 matchant DEJA une sequence prefixe/port plus haut
+#   (Commvault, Backup, TUBE, SCAVENGER) garde le traitement data policy mais
+#   perd LO_SLA_VIDEO. Trafic tres etroit; l'alternative (remonter DSCP 32 dans
+#   le bloc DSCP) perdrait a l'inverse le local_tloc de ces sequences.
+#
+# CONTRADICTION HERITEE D'UX1 - sequence COMMVAULT_SIN_TO_SERVERS: la data
+# policy epingle le trafic sur local_tloc custom2/custom1 pendant que LO_AAR
+# demande preferred_colors custom1, custom2. Les deux etaient bien poses en UX1 sur le meme
+# trafic. Conserve tel quel puisque reproduction stricte demandee - mais c'est
+# une incoherence a arbitrer un jour.
+#
+# VALEUR PROPRE AU SITE - preferred_colors: les couleurs INTERNET - CML est branch-b-routed, internet-only, sans
+#   MPLS donc sans private1/private2.
+#
+# Schema (sdwan_features_application_priority.tf), valide 2026-09-02:
+#   sequence_id est REECRIT par le module: (id - 1) * 10 + 1.
+#   default_action / direction / vpns sont lus SANS try() => obligatoires.
+
+sdwan:
+  feature_profiles:
+    application_priority_profiles:
+      - name: "APP-PRIORITY-__SITE__"
+        traffic_policies:
+          - name: "TRAFFIC-__SITE__"
+            description: "Traffic policy - __SITE__ (LO_QOSClass + LO_AAR fusionnees)"
+            default_action: accept
+            direction: all
+            vpns:
+              - 10
+            sequences:
+
+              # UX1 data seq 31 + AAR seq 1 - voix DSCP 46
+              - sequence_id: 1
+                sequence_name: "VOICE_EF"
+                base_action: accept
+                match_entries:
+                  dscps: [46]
+                actions:
+                  forwarding_class: "LO_VOICE-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VOICE-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 41 (+ AAR seq 1 via le DSCP 46 pose ici)
+              - sequence_id: 2
+                sequence_name: "VOICE_APPS"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_Voice_V2-__SITE__"
+                actions:
+                  dscp: 46
+                  forwarding_class: "LO_VOICE-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VOICE-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 51 - aucun match AAR (48 absent de LO_AAR)
+              - sequence_id: 3
+                sequence_name: "CONTROL_DSCP_CS6"
+                base_action: accept
+                match_entries:
+                  dscps: [48]
+                actions:
+                  forwarding_class: "LO_CONTROL-__SITE__"
+
+              # UX1 data seq 61 + AAR seq 31 - DSCP 24 est dans les deux
+              - sequence_id: 4
+                sequence_name: "CONTROL_DSCP_CS3"
+                base_action: accept
+                match_entries:
+                  dscps: [24]
+                actions:
+                  forwarding_class: "LO_CONTROL-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 71 - aucun match AAR
+              - sequence_id: 5
+                sequence_name: "CONTROL_DSCP_CS2"
+                base_action: accept
+                match_entries:
+                  dscps: [16]
+                actions:
+                  forwarding_class: "LO_CONTROL-__SITE__"
+
+              # UX1 data seq 81 - aucun match AAR (DSCP 48 pose ici)
+              - sequence_id: 6
+                sequence_name: "CONTROL_NETWORK"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_Net_Ctrl_V2-__SITE__"
+                actions:
+                  dscp: 48
+                  forwarding_class: "LO_CONTROL-__SITE__"
+
+              # UX1 data seq 91 + AAR seq 31 via le DSCP 24 pose ici
+              - sequence_id: 7
+                sequence_name: "CONTROL_SIGNALING"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_Signaling_V2-__SITE__"
+                actions:
+                  dscp: 24
+                  forwarding_class: "LO_CONTROL-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 101 - aucun match AAR (DSCP 16 pose ici)
+              - sequence_id: 8
+                sequence_name: "CONTROL_OAM"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_OAM_V2-__SITE__"
+                actions:
+                  dscp: 16
+                  forwarding_class: "LO_CONTROL-__SITE__"
+
+              # UX1 data seq 111 + AAR seq 11 - DSCP 34
+              - sequence_id: 9
+                sequence_name: "REALTIME_DSCP_AF41"
+                base_action: accept
+                match_entries:
+                  dscps: [34]
+                actions:
+                  forwarding_class: "LO_REAL-TIME-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 121 + AAR seq 11/51 - couvre aussi LO_Teams_Video,
+              # sous-ensemble de LO_Business_MM_Conferencing_V2 (meme SLA)
+              - sequence_id: 10
+                sequence_name: "REALTIME_CONFERENCING"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_MM_Conf_V2-__SITE__"
+                actions:
+                  dscp: 34
+                  forwarding_class: "LO_REAL-TIME-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 131 - aucun match AAR (26 absent de LO_AAR)
+              - sequence_id: 11
+                sequence_name: "MULTIMEDIA_DSCP_AF31"
+                base_action: accept
+                match_entries:
+                  dscps: [26]
+                actions:
+                  forwarding_class: "LO_MULTIMEDIA-__SITE__"
+
+              # UX1 data seq 141 - aucun match AAR
+              - sequence_id: 12
+                sequence_name: "MULTIMEDIA_STREAMING"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_MM_Streaming_V2-__SITE__"
+                actions:
+                  dscp: 26
+                  forwarding_class: "LO_MULTIMEDIA-__SITE__"
+
+              # UX1 data seq 151 - aucun match AAR
+              - sequence_id: 13
+                sequence_name: "MULTIMEDIA_TUBE_SERVER"
+                base_action: accept
+                match_entries:
+                  source_data_ipv4_prefix_list: "LO_TUBE_SERVER-__SITE__"
+                  source_ports: [443, 8443]
+                actions:
+                  forwarding_class: "LO_MULTIMEDIA-__SITE__"
+                  local_tloc:
+                    colors: [custom2, custom1]
+                    encapsulation: ipsec
+
+              # UX1 data seq 161 + AAR seq 41 - DSCP 18
+              - sequence_id: 14
+                sequence_name: "APPLICATIONS_DSCP_AF21"
+                base_action: accept
+                match_entries:
+                  dscps: [18]
+                actions:
+                  forwarding_class: "LO_APPLICATIONS-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 171 + AAR seq 41 via le DSCP 18 pose ici
+              - sequence_id: 15
+                sequence_name: "APPLICATIONS_TRANSAC"
+                base_action: accept
+                match_entries:
+                  application_list: "LO_Business_Transac_Data_V2-__SITE__"
+                actions:
+                  dscp: 18
+                  forwarding_class: "LO_APPLICATIONS-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # UX1 data seq 181 (restreinte) + AAR seq 61 - voir CONTRADICTION
+              # dans l'en-tete: local_tloc et preferred_colors se contredisent
+              - sequence_id: 16
+                sequence_name: "COMMVAULT_SIN_TO_SERVERS"
+                base_action: accept
+                match_entries:
+                  source_data_ipv4_prefix_list: "LO_COMMVAULT_SIN_SERVER-__SITE__"
+                  destination_data_ipv4_prefix_list: "LO_COMMVAULT_SERVERS-__SITE__"
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  local_tloc:
+                    colors: [custom2, custom1]
+                    encapsulation: ipsec
+                  sla_class:
+                    sla_class_list: "LO_SLA_COMMVAULT-__SITE__"
+                    preferred_colors: [custom1, custom2]
+                    fallback_to_best_path: true
+                  counter_name: "LO_COMMVAULT_Count"
+
+              # UX1 data seq 181 - reste du match (destination seule). Le match
+              # source d'UX1 etait anonymise <IPNETWORK>, la regle est plus large
+              - sequence_id: 17
+                sequence_name: "BACKUP_TO_COMMVAULT"
+                base_action: accept
+                match_entries:
+                  destination_data_ipv4_prefix_list: "LO_COMMVAULT_SERVERS-__SITE__"
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  local_tloc:
+                    colors: [custom2, custom1]
+                    encapsulation: ipsec
+
+              # UX1 data seq 191 - aucun match AAR (source, pas destination)
+              - sequence_id: 18
+                sequence_name: "BACKUP_CIFS"
+                base_action: accept
+                match_entries:
+                  source_data_ipv4_prefix_list: "LO_BACKUP_SERVERS-__SITE__"
+                  application_list: "Windows_File_tranfer-__SITE__"
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  local_tloc:
+                    colors: [custom2, custom1]
+                    encapsulation: ipsec
+
+              # UX1 data seq 201 + AAR seq 81
+              - sequence_id: 19
+                sequence_name: "BACKUP_PORTS"
+                base_action: accept
+                match_entries:
+                  destination_data_ipv4_prefix_list: "LO_BACKUP_SERVERS-__SITE__"
+                  destination_ports: [5018, 5985]
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  local_tloc:
+                    colors: [custom2, custom1]
+                    encapsulation: ipsec
+                  sla_class:
+                    sla_class_list: "LO_SLA_CUSTOM1-2-__SITE__"
+                    preferred_colors: [custom1, custom2]
+                    fallback_to_best_path: true
+
+              # UX1 data seq 211 - aucun match AAR
+              - sequence_id: 20
+                sequence_name: "DATA_DSCP_AF11"
+                base_action: accept
+                match_entries:
+                  dscps: [10]
+                actions:
+                  forwarding_class: "LO_DATA-__SITE__"
+
+              # UX1 data seq 221 - aucun match AAR
+              - sequence_id: 21
+                sequence_name: "DATA_DSCP_CS1"
+                base_action: accept
+                match_entries:
+                  dscps: [8]
+                actions:
+                  forwarding_class: "LO_DATA-__SITE__"
+
+              # UX1 data seq 231 - aucun match AAR
+              - sequence_id: 22
+                sequence_name: "SCAVENGER_HOSTS"
+                base_action: accept
+                match_entries:
+                  source_data_ipv4_prefix_list: "LO_SCAVENGER_HOSTS-__SITE__"
+                actions:
+                  forwarding_class: "LO_DATA-__SITE__"
+                  local_tloc:
+                    colors: [custom1, custom2]
+                    encapsulation: ipsec
+
+              # ---- matchs portes UNIQUEMENT par LO_AAR ----
+              # Aucune sequence data policy ne les couvre: ils recoivent la
+              # forwarding class que le defaut UX1 leur aurait donnee.
+
+              # AAR seq 21 - DSCP 32. Voir LIMITE CONNUE dans l'en-tete
+              - sequence_id: 23
+                sequence_name: "VIDEO_DSCP_CS4"
+                base_action: accept
+                match_entries:
+                  dscps: [32]
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_VIDEO-__SITE__"
+                    preferred_colors: [custom1, custom2]
+
+              # AAR seq 71 - chemin retour Commvault
+              - sequence_id: 24
+                sequence_name: "COMMVAULT_SERVERS_TO_SIN"
+                base_action: accept
+                match_entries:
+                  source_data_ipv4_prefix_list: "LO_COMMVAULT_SERVERS-__SITE__"
+                  destination_data_ipv4_prefix_list: "LO_COMMVAULT_SIN_SERVER-__SITE__"
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_COMMVAULT-__SITE__"
+                    preferred_colors: [custom1, custom2]
+                    fallback_to_best_path: true
+                  counter_name: "LO_COMMVAULT_Count"
+
+              # AAR seq 81 - destination Backup hors ports 5018/5985
+              - sequence_id: 25
+                sequence_name: "BACKUP_SERVERS"
+                base_action: accept
+                match_entries:
+                  destination_data_ipv4_prefix_list: "LO_BACKUP_SERVERS-__SITE__"
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"
+                  sla_class:
+                    sla_class_list: "LO_SLA_CUSTOM1-2-__SITE__"
+                    preferred_colors: [custom1, custom2]
+                    fallback_to_best_path: true
+
+              # UX1 data seq 241 - fourre-tout
+              - sequence_id: 26
+                sequence_name: "DEFAULT_BESTEFFORT"
+                base_action: accept
+                actions:
+                  forwarding_class: "LO_BESTEFFORT-__SITE__"

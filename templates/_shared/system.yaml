@@ -1,0 +1,165 @@
+# templates/_shared/system.yaml
+#
+# System feature profile — used by EVERY variant (dc, branch-a, branch-b).
+# Only the profile name is site-scoped (__SITE__ token); fabric-wide values
+# come from globals.yaml via __GLOBAL:<key>__; per-device values are UX2
+# config-group variables declared with `<field>_variable: <var_name>` keys
+# (the module wraps the name in {{...}} itself) and supplied per router in
+# sites/<site>/data/site-values.yaml.
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0 module source
+# (sdwan_features_system.tf).  Structure notes:
+#   - Root key `sdwan:` + feature_profiles.system_profiles[] (no `parcels:`
+#     wrapper; each parcel is a direct key on the profile).
+#   - Global and OMP parcels are mandatory for an edge-deployable system
+#     profile. They are created with explicit names and provider/vManage
+#     defaults for all optional settings.
+#   - Files rendered into the same site dir are deep-merged by the module's
+#     utils_yaml_merge, and LIST ITEMS MERGE BY `name` — that is how the
+#     variant-specific aaa parcel (templates/*/aaa_tacacs.yaml) lands on
+#     this same SYS-__SITE__ profile object.  Verified empirically against
+#     netascode/utils 1.0.2.
+#
+# The aaa parcel (auth order + TACACS groups) is variant-specific and lives
+# in templates/branch/aaa_tacacs.yaml and templates/dc/aaa_tacacs.yaml.
+# DNS is NOT here: UX2 has no system DNS parcel — it is per-VPN, wired in
+# the transport templates via the vpn0_dns_* device variables.
+
+sdwan:
+  feature_profiles:
+    system_profiles:
+      - name: "SYS-__SITE__"
+        description: "System feature profile - __SITE__"
+
+        # Basic system settings.  timezone / port_offset / GPS are
+        # per-device (UX1 attach variables) — referenced by variable name.
+        basic:
+          console_baud_rate: "9600"
+          timezone_variable: timezone
+          port_offset_variable: port_offset
+          latitude_variable: gps_lat
+          longitude_variable: gps_lon
+
+        # Mandatory edge system parcel. Optional settings intentionally use
+        # provider/vManage defaults until fabric requirements are confirmed.
+        global:
+          name: "global"
+          description: "Global system defaults - __SITE__"
+
+        # Fabric security parcel (requirement 2026-07-29: rekey 48h,
+        # anti-replay 4096, integrity on vManage-default algorithms).
+        # Data model: features_system/system_security/ on
+        # https://netascode.cisco.com/docs/data_models/
+        #
+        # integrity_types MUST be set explicitly (list, plural — the
+        # singular `integrity_type` key is silently ignored by NaC 1.4.0).
+        # "Unset = default" only holds in the vManage GUI; an API-created
+        # parcel with a null integrityType makes device config generation
+        # fail at deploy with:
+        #   "Attempted to access 'value' on a null value at
+        #    /velocity_template/sdwan/system/security.vt[line 9, ...]"
+        # (hit live 2026-07-29).  [esp, ip-udp-esp] is the GUI default.
+        security:
+          name: "fabric_security"
+          description: "FABRIC_SECURITY - __SITE__"
+          rekey_time: 172800        # seconds = 48 h IPsec rekey
+          anti_replay_window: 4096  # packets (allowed: 64..8192 powers of 2)
+          integrity_types: ["esp", "ip-udp-esp"]  # vManage GUI default pair
+
+        # Mandatory edge OMP parcel (requirement 2026-07-29: graceful
+        # restart 24h, send-path/ECMP limits 16).  Other timers and the
+        # protocol advertisement booleans stay on vManage defaults; routing
+        # policy is modelled separately.
+        # Data model: features_system/system_omp/ on
+        # https://netascode.cisco.com/docs/data_models/
+        omp:
+          name: "omp"
+          description: "OMP - __SITE__"
+          overlay_as: 131074
+          graceful_restart: true
+          graceful_restart_timer: 86400   # seconds = 24 h
+          holdtime: 60                     # health of the OMP peer connection between Cisco vSmart controllers and edge devices.
+          send_path_limit: 16             # paths advertised per prefix (max 16)
+          ecmp_limit: 16                  # equal-cost paths installed (max 16)
+          advertise_ipv4_bgp: true
+          advertise_ipv4_ospf: true
+          omp_admin_distance_ipv4: 251
+
+
+
+        # AAA — LOCAL USERS ONLY (fabric-wide identical, from UX1: two
+        # privilege-15 accounts).  The rest of the aaa parcel (auth_order +
+        # TACACS groups) is variant-specific and lives in
+        # templates/<variant>/aaa_tacacs.yaml — the module's YAML merge
+        # combines both onto this same SYS-__SITE__ profile (dicts merge
+        # recursively, list items merge by `name`).
+        #
+        # `password` is the only credential field in the UX2 model (the
+        # UX1 password/secret pair collapses into it; IOS-XE renders
+        # `username <name> privilege 15 secret ...`).  Accepts cleartext
+        # (vManage encrypts on receipt) or a pre-hashed $9$... string.
+        # Values below are BLOCKING ALL_CAPS placeholders — fill real
+        # accounts before deploy; never commit real credentials.
+        aaa:
+          users:
+            - name: "dnac"           # day-to-day local admin
+              password: "C1sc0poc"
+              privilege: "15"
+            - name: "rescuser"          # break-glass account
+              password: "rescuser"
+              privilege: "15" 
+
+        # Syslog — fabric-wide server list (see globals.yaml `logging:`)
+        logging:
+          ipv4_servers: "__GLOBAL:logging.ipv4_servers__"
+
+        # NTP — fabric-wide server list (see globals.yaml `ntp:`)
+        ntp:
+          servers: "__GLOBAL:ntp.servers__"
+
+        # SNMP — SNMPv3 auth-priv, modelled 2026-07-29 from UX1
+        # LO_snmp_v3-2026: view + group + two v3 users (SHA auth,
+        # AES-128 privacy — the only protocols the data model offers are
+        # `sha` / `aes-cfb-128` / `aes-256-cfb-128`).  View/group names and
+        # the OID subtree are fabric-global (globals.yaml `snmp:`).
+        #
+        # SECRETS: user names and passwords below are BLOCKING ALL_CAPS
+        # placeholders — generate.py flags them and --strict refuses to
+        # proceed.  Fill in the real values before deploying (or switch to
+        # authentication_password_variable / privacy_password_variable to
+        # supply them per router from values/<site>.yaml).  Never commit
+        # real credentials.  Both users share one auth and one priv
+        # password, exactly like the UX1 template; drop the second user
+        # entry if only one account is needed.
+        snmp:
+          contact_person: "__GLOBAL:snmp.contact__"
+          views:
+            - name: "__GLOBAL:snmp.view__"
+              oids:
+                - id: "__GLOBAL:snmp.view_oid__"
+          groups:
+            - name: "__GLOBAL:snmp.group__"
+              security_level: auth-priv
+              view: "__GLOBAL:snmp.view__"
+          users:
+            - name: "SNMP_USERNAME_1"                    # fill in real account
+              group: "__GLOBAL:snmp.group__"
+              authentication_protocol: sha
+              authentication_password: "SNMP_AUTH_PASSWORD"
+              privacy_protocol: aes-cfb-128
+              privacy_password: "SNMP_PRIV_PASSWORD"
+            - name: "SNMP_USERNAME_2"                    # fill in real account
+              group: "__GLOBAL:snmp.group__"
+              authentication_protocol: sha
+              authentication_password: "SNMP_AUTH_PASSWORD"
+              privacy_protocol: aes-cfb-128
+              privacy_password: "SNMP_PRIV_PASSWORD"
+
+        # Banner — MOTD field (the UX1 template pushes motd, not login)
+        banner:
+          motd: "__GLOBAL:banner.motd__"
+
+        # BFD app-route probe timers
+        bfd:
+          multiplier: "__GLOBAL:bfd.multiplier__"
+          poll_interval: "__GLOBAL:bfd.poll_interval__"

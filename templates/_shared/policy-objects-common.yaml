@@ -1,0 +1,238 @@
+# templates/_shared/policy-objects-common.yaml
+#
+# Policy objects ("Groups of Interest") that are IDENTICAL for every site and
+# every variant.  Added 2026-09-02 when the UX1 data policies were migrated:
+# the DC and branch object sets turned out to differ only in the forwarding
+# classes, so everything else is declared once here instead of being kept in
+# sync by hand in templates/dc/ and templates/branch/.
+#
+# SPLIT ACROSS FILES — the NaC module merges every YAML under sites/<site>/data/
+# before reading it (netascode utils_yaml_merge: dicts merge recursively, lists
+# of dicts merge by `name`).  So `feature_profiles.policy_object_profile` may be
+# assembled from several files:
+#     _shared/policy-objects-common.yaml   profile name + fabric-wide objects  (here)
+#     dc/policy-objects.yaml        DC-only forwarding class (LO_VIDEO, queue 1)
+#     branch/policy-objects.yaml    branch-only prefix list (LO_BB_PFX)
+# validate_model.py check 6 re-does that merge and verifies every reference
+# resolves, so a mistake here is caught before terraform runs.
+#
+# NAMING — every object carries the -__SITE__ suffix.  Parcel names are unique
+# across the WHOLE tenant, not per profile: an apply from sites/bxt was rejected
+# on 2026-08-19 with PPARC0012 "Duplicate parcel name LO_BB_PFX found in config
+# group CG-CML".  The suffix is rendered verbatim into the running-config
+# (class-map LO_VOICE-BXT, ip prefix-list LO_BB_PFX-BXT), so operational
+# procedures must treat these names as per-site.  Never drop it.
+#
+# SCHEMA-VALIDATED 2026-09-02 against nac-sdwan 1.4.0 (sdwan_policy_objects.tf,
+# recovered from backup_20260901_nac4/sites/bel/.terraform/modules/sdwan):
+#   application_lists[].applications   list of NBAR app names  <- NOT `entries`
+#   ipv4_data_prefix_lists[].prefixes  list of CIDR strings (module splits on /)
+#   forwarding_classes[].queue         int, 0-7; queue 0 => llq, others => wrr
+#   sla_classes[]                      latency_ms / loss_percentage / jitter_ms
+#                                      / fallback_best_tunnel_*
+
+sdwan:
+  feature_profiles:
+    policy_object_profile:
+      # Explicit name — without it the module falls back to its own default
+      # ("policy_objects", defaults/defaults.yaml:462), which is not per-site
+      # and would collide between roots.
+      name: "PO-__SITE__"
+      description: "Policy objects - __SITE__"
+
+      # ── Forwarding classes (UX2 class maps) ─────────────────────────────────
+      # The seven classes referenced by the QoS classification traffic policy
+      # (TRAFFIC-__SITE__ in values/aar/<site>.yaml).  Queue numbers
+      # come from the UX1 `class` policy lists and are IDENTICAL fabric-wide;
+      # only the bandwidth split per queue differs between DC and branch, and
+      # that lives in the per-variant qos_policies.
+      #
+      # The DC adds LO_VIDEO-__SITE__ on queue 1 (templates/dc/policy-objects.yaml).
+      #
+      # NOT declared any more (2026-09-02): LO_DEFAULT (q2), LO_STREAMING (q3),
+      # LO_TRANSACTIONAL (q4), LO_SCAVENGER (q7).  In UX1 those were the DC
+      # scheduler's names for queues that the DC data policy (LO_QOSClass_V3)
+      # actually classifies as LO_CONTROL / LO_REAL-TIME / LO_MULTIMEDIA /
+      # LO_BESTEFFORT — two names per queue.  UX2 keys the scheduler BY
+      # forwarding class (sdwan_features_application_priority.tf derives the
+      # queue from the class map), so keeping both names would mean two
+      # scheduler entries on the same queue.  One name per queue, the one the
+      # traffic policy sets.
+      forwarding_classes:
+        - name: "LO_VOICE-__SITE__"
+          queue: 0
+        - name: "LO_CONTROL-__SITE__"
+          queue: 2
+        - name: "LO_REAL-TIME-__SITE__"
+          queue: 3
+        - name: "LO_MULTIMEDIA-__SITE__"
+          queue: 4
+        - name: "LO_APPLICATIONS-__SITE__"
+          queue: 5
+        - name: "LO_DATA-__SITE__"
+          queue: 6
+        - name: "LO_BESTEFFORT-__SITE__"
+          queue: 7
+
+      # ── SLA classes ─────────────────────────────────────────────────────────
+      # Path-selection thresholds from the UX1 `sla` policy lists, referenced by
+      # the AAR sequences.  Identical for DC and branch (one central LO_AAR).
+      sla_classes:
+        - name: "LO_SLA_VOICE-__SITE__"
+          latency_ms: 210
+          loss_percentage: 4
+          jitter_ms: 30
+        - name: "LO_SLA_VIDEO-__SITE__"
+          latency_ms: 200
+          loss_percentage: 4
+          jitter_ms: 30
+        - name: "LO_SLA_COMMVAULT-__SITE__"
+          latency_ms: 400
+          loss_percentage: 50
+          jitter_ms: 10
+          fallback_best_tunnel_criteria: latency
+          fallback_best_tunnel_latency_variance: 300
+        - name: "LO_SLA_CUSTOM1-2-__SITE__"
+          latency_ms: 200
+          loss_percentage: 5
+          jitter_ms: 2
+          fallback_best_tunnel_criteria: latency-loss
+
+      # ── Application lists (NBAR) ────────────────────────────────────────────
+      # Entries copied verbatim from the UX1 `app` policy lists in the vManage
+      # export (DATA/policies.json).  The key is `applications`, NOT `entries`:
+      # the module reads try(each.value.applications, []) and an `entries:` list
+      # silently yields an EMPTY app list — no terraform error, just a match
+      # that never fires.  (Fixed here 2026-09-02; LO_Teams_Video had `entries`.)
+      #
+      # `Windows_File_tranfer` keeps the UX1 spelling (typo included) so the
+      # object stays recognisable against the vManage export.
+      application_lists:
+        - name: "LO_Teams_Video-__SITE__"
+          applications:
+            - ms-teams-video
+        - name: "LO_Business_Voice_V2-__SITE__"
+          applications:
+            - ms-lync-audio
+            - ms-teams-audio
+            - rtp-audio
+        - name: "LO_Business_Net_Ctrl_V2-__SITE__"
+          applications:
+            - pim-rp-disc
+            - pim
+            - bgp
+            - capwap-control
+            - cisco-meraki
+            - cisco-sdwan-control
+            - cisco-tdp
+            - egp
+            - eigrp
+            - igrp
+            - isakmp
+            - ldp
+            - ospf
+            - rip
+            - ripng
+            - vrrp
+        - name: "LO_Business_Signaling_V2-__SITE__"
+          applications:
+            - rtcp
+            - rtsp
+            - sip
+            - sip-tls
+            - ms-lync-control
+            - h225
+            - h245
+            - sflow
+            - ups
+        - name: "LO_Business_OAM_V2-__SITE__"
+          applications:
+            - dhcp
+            - active-directory
+            - auth-service
+            - auth
+            - cisco-controller
+            - cisco-cta
+            - cisco-fna
+            - cisco-nac
+            - cisco-rtmt
+            - cisco-sd-avc
+            - cisco-stealthwatch
+            - cisco-sys
+            - cisco-tna
+            - dhcp-failover
+            - dhcp-failover2
+            - dhcpv6
+            - dhcpv6-client
+            - dhcpv6-server
+            - dns
+            - echo
+            - ha-cluster
+            - http-mgmt
+            - icmp
+            - igmp
+            - kerberos
+            - kerberos-adm
+            - ldap
+            - ms-netlogon
+            - ms-win-dns
+            - netflow
+            - ntp
+            - ping
+            - radius
+            - rtelnet
+            - secure-ldap
+            - secure-telnet
+            - telnet
+            - ssh
+            - sshell
+            - stuns
+            - syslog
+            - tacacs
+            - tftp
+            - traceroute-linux
+            - snmp
+        - name: "LO_Business_MM_Conf_V2-__SITE__"
+          applications:
+            - ms-teams-media
+            - cisco-ip-sla
+            - ms-teams
+            - ms-teams-video
+            - rtp-video
+            - rtp
+            - ms-lync
+            - ms-lync-video
+            - skype
+        - name: "LO_Business_MM_Streaming_V2-__SITE__"
+          applications:
+            - citrix
+            - citrix-static
+            - vmware-vmotion
+            - ms-teams-app-sharing
+            - xwindows
+            - ms-stream
+        - name: "LO_Business_Transac_Data_V2-__SITE__"
+          applications:
+            - atlassian
+            - github
+            - reuters
+        - name: "Windows_File_tranfer-__SITE__"
+          applications:
+            - cifs
+
+      # ── Data prefix lists ───────────────────────────────────────────────────
+      # Server CIDRs used by the AAR and QoS classification sequences.  All of
+      # them were anonymised in the vManage export, so the real values live in
+      # globals.yaml and are currently BLOCKING placeholders — generate.py
+      # reports them and --strict aborts until they are filled in.
+      ipv4_data_prefix_lists:
+        - name: "LO_COMMVAULT_SIN_SERVER-__SITE__"
+          prefixes: "__GLOBAL:commvault.sin_server_prefixes__"
+        - name: "LO_COMMVAULT_SERVERS-__SITE__"
+          prefixes: "__GLOBAL:commvault.server_prefixes__"
+        - name: "LO_BACKUP_SERVERS-__SITE__"
+          prefixes: "__GLOBAL:backup.server_prefixes__"
+        - name: "LO_TUBE_SERVER-__SITE__"
+          prefixes: "__GLOBAL:qos_hosts.tube_server_prefixes__"
+        - name: "LO_SCAVENGER_HOSTS-__SITE__"
+          prefixes: "__GLOBAL:qos_hosts.scavenger_host_prefixes__"

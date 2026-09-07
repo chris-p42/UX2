@@ -1,9 +1,0 @@
-version: v2c
-communities:
-  - name: acme-ro
-    type: read-only
-  - name: acme-rw
-    type: read-write
-trap_destinations:
-  - address: 10.1.3.1
-    vpn: 0

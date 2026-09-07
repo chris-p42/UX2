@@ -1,0 +1,483 @@
+version 17.15
+service tcp-keepalives-in
+service tcp-keepalives-out
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service password-encryption
+service call-home
+platform qfp utilization monitor load 80
+platform console virtual
+!
+hostname <HOSTNAME>
+vrf definition Mgmt-intf
+description Transport VPN
+rd 1:512
+!
+address-family ipv4
+  route-target export 655370:512
+  route-target import 655370:512
+exit-address-family
+!
+address-family ipv6
+exit-address-family
+!
+no logging queue-limit
+logging buffered 512000
+logging persistent size 104857600 filesize 10485760
+no logging monitor
+aaa new-model
+!
+!
+aaa group server tacacs+ tacacs-10
+server-private <IP ADDR> key 6 <PASSWD>
+server-private <IP ADDR> key 6 <PASSWD>
+ip vrf forwarding 10
+ip tacacs source-interface Loopback10
+!
+aaa authentication login default group tacacs-10 local
+aaa authorization config-commands
+aaa authorization exec default group tacacs-10 local
+aaa authorization commands 1 default group tacacs-10 if-authenticated
+aaa authorization commands 15 default group tacacs-10 if-authenticated
+aaa accounting exec default start-stop group tacacs-10
+aaa accounting commands 1 default start-stop group tacacs-10
+aaa accounting network default start-stop group tacacs-10
+!
+!
+aaa server radius dynamic-author
+!
+aaa session-id common
+no process cpu extended history
+clock timezone <TIMEZONE> 1 0
+clock summer-time <DST_TIMEZONE> recurring last Sun Mar 1:00 last Sun Oct 1:00
+!
+!
+!
+!
+!
+ip arp proxy disable
+!
+!
+!
+!
+!
+!
+!
+ip name-server <IP ADDR> <IP ADDR>
+no ip domain lookup
+ip bootp server
+ip dhcp use vrf remote
+ip dhcp use hardware-address client-id
+!
+ip dhcp pool vrf-10-GigabitEthernet0/0/4
+vrf 10
+network <IP ADDR> <IP ADDR>
+default-router <IP ADDR>
+dns-server <IP ADDR>
+!
+ip dhcp pool vrf-10-GigabitEthernet0/0/5.62
+vrf 10
+network <IP ADDR> <IP ADDR>
+option 43 ascii "5A1N;B2;K4;I<IP ADDR>;J80"
+default-router <IP ADDR>
+dns-server <IP ADDR>
+!
+crypto pki trustpoint TP-self-signed-<CERT_ID>
+enrollment selfsigned
+revocation-check crl
+hash sha512
+!
+crypto pki trustpoint SLA-TrustPoint
+enrollment pkcs12
+revocation-check crl
+hash sha512
+!
+!
+crypto pki certificate chain TP-self-signed-<CERT_ID>
+crypto pki certificate chain SLA-TrustPoint
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+diagnostic bootup level minimal
+!
+license udi pid <DEVICE_MODEL> sn <SERIAL>
+memory free low-watermark processor 331076
+diagnostic bootup level minimal
+!
+!
+spanning-tree extend system-id
+!
+!
+!
+username <USERNAME> privilege 15 secret 9 <PASSWD>
+username <USERNAME> privilege 15 secret 9 <PASSWD>
+!
+redundancy
+!
+!
+!
+!
+!
+no crypto ikev2 diagnose error
+!
+!
+cdp run
+!
+lldp run
+!
+class-map match-any LO_SCAVENGER
+match qos-group 7
+class-map match-any LO_STREAMING
+match qos-group 3
+class-map match-any LO_VOICE
+match qos-group 0
+class-map match-any LO_VIDEO
+match qos-group 1
+class-map match-any LO_TRANSACTIONAL
+match qos-group 4
+class-map match-any LO_DEFAULT
+match qos-group 2
+class-map match-any LO_CONTROL
+match qos-group 2
+class-map match-any LO_DATA
+match qos-group 6
+class-map match-any LO_BESTEFFORT
+match qos-group 7
+class-map match-any LO_MULTIMEDIA
+match qos-group 4
+class-map match-any LO_APPLICATIONS
+match qos-group 5
+class-map match-any Queue1
+match qos-group 1
+  shape average 1000000000
+  service-policy LO_QOSMAP_V2
+policy-map LO_QOSMAP
+class Queue0
+  priority level 1
+  police rate percent 10
+class Queue1
+  bandwidth remaining ratio 20
+class Queue3
+  bandwidth remaining ratio 15
+  random-detect precedence-based
+class Queue4
+  bandwidth remaining ratio 15
+  random-detect precedence-based
+class Queue5
+  bandwidth remaining ratio 15
+  random-detect precedence-based
+class Queue6
+  bandwidth remaining ratio 10
+  random-detect precedence-based
+class Queue7
+  bandwidth remaining ratio 5
+  random-detect precedence-based
+class class-default
+  bandwidth remaining ratio 10
+policy-map shape_GigabitEthernet0/0/2
+class class-default
+  shape average 300000000
+  service-policy LO_QOSMAP_V2
+policy-map shape_GigabitEthernet0/0/1
+class class-default
+  shape average 1000000000
+  service-policy LO_QOSMAP_V2
+policy-map shape_GigabitEthernet0/0/0
+class class-default
+  shape average 1000000000
+  service-policy LO_QOSMAP_V2
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+service-insertion service-node-group appqoe SNG-APPQOE
+service-node <IP ADDR>
+!
+service-insertion appnav-controller-group appqoe ACG-APPQOE
+appnav-controller <IP ADDR>
+!
+service-insertion service-context appqoe/1
+cluster-type integrated-service-node
+appnav-controller-group ACG-APPQOE
+service-node-group SNG-APPQOE
+vrf global
+enable
+!
+!
+!
+!
+interface Loopback10
+vrf forwarding 10
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip mtu 1500
+!
+interface Loopback65528
+vrf forwarding 65528
+ip address <IP ADDR> <IP ADDR>
+!
+interface Loopback65529
+vrf forwarding 65529
+ip address <IP ADDR> <IP ADDR>
+!
+interface Tunnel0
+ip unnumbered GigabitEthernet0/0/0
+no ip redirects
+ipv6 unnumbered GigabitEthernet0/0/0
+no ipv6 redirects
+tunnel source GigabitEthernet0/0/0
+tunnel mode sdwan
+!
+interface Tunnel1
+ip unnumbered GigabitEthernet0/0/1
+no ip redirects
+ipv6 unnumbered GigabitEthernet0/0/1
+no ipv6 redirects
+tunnel source GigabitEthernet0/0/1
+tunnel mode sdwan
+!
+interface Tunnel2
+ip unnumbered GigabitEthernet0/0/2
+no ip redirects
+ipv6 unnumbered GigabitEthernet0/0/2
+no ipv6 redirects
+tunnel source GigabitEthernet0/0/2
+tunnel mode sdwan
+!
+interface Tunnel992003
+ip unnumbered GigabitEthernet0/0/3.992
+no ip redirects
+ipv6 unnumbered GigabitEthernet0/0/3.992
+no ipv6 redirects
+tunnel source GigabitEthernet0/0/3.992
+tunnel mode sdwan
+!
+interface VirtualPortGroup2
+ip address <IP ADDR> <IP ADDR>
+service-insertion appqoe
+!
+interface VirtualPortGroup4
+vrf forwarding 10
+ip address <IP ADDR> <IP ADDR>
+!
+interface GigabitEthernet0/0/0
+description <SITE> INTERNET 1
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip nat outside
+load-interval 30
+negotiation auto
+arp timeout 1200
+service-policy output shape_GigabitEthernet0/0/0
+!
+interface GigabitEthernet0/0/1
+description private1 TO <REMOTE_SITE>
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip ospf authentication message-digest
+ip ospf message-digest-key 7 md5 7 <PASSWD>
+ip ospf network point-to-multipoint
+ip ospf dead-interval 20
+ip ospf hello-interval 5
+ip ospf 65535 area 172
+load-interval 30
+negotiation auto
+arp timeout 1200
+service-policy output shape_GigabitEthernet0/0/1
+!
+interface GigabitEthernet0/0/2
+description <SITE> INTERNET 2
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip nat outside
+load-interval 30
+negotiation auto
+arp timeout 1200
+service-policy output shape_GigabitEthernet0/0/2
+!
+interface GigabitEthernet0/0/3
+description *** Private PARENT TLOC-EXT ***
+mtu 1504
+no ip address
+no ip redirects
+load-interval 30
+negotiation auto
+arp timeout 1200
+!
+interface GigabitEthernet0/0/3.991
+description Private 1 TLOC-EXT Relay FOR <PEER_DEVICE>
+encapsulation dot1Q 991
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip mtu 1500
+ip ospf network broadcast
+ip ospf dead-interval 40
+ip ospf 65535 area 172
+arp timeout 1200
+!
+interface GigabitEthernet0/0/3.992
+description Private 2 TLOC-EXT <LOCAL_DEVICE> VIA <PEER_DEVICE>
+encapsulation dot1Q 992
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+arp timeout 1200
+service-policy output shape_GigabitEthernet0/0/3.992
+!
+interface GigabitEthernet0/0/4
+description INT-FOR-OPENGEAR
+vrf forwarding 10
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip nbar protocol-discovery
+load-interval 30
+negotiation auto
+arp timeout 1200
+!
+interface GigabitEthernet0/0/5
+no ip address
+negotiation auto
+!
+interface GigabitEthernet0/0/5.62
+description <INTERNAL_INTERFACE_LABEL>
+encapsulation dot1Q 62
+vrf forwarding 10
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip nbar protocol-discovery
+arp timeout 1200
+vrrp 62 address-family ipv4
+  vrrpv2
+  address <IP ADDR> primary
+  exit-vrrp
+!
+interface GigabitEthernet0/0/5.3101
+description INT-VLAN-BGP-INFRA
+encapsulation dot1Q 3101
+vrf forwarding 10
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip nbar protocol-discovery
+bfd template bfd1
+arp timeout 1200
+!
+interface GigabitEthernet0/0/5.3103
+description INT-VLAN-BGP-CORP
+encapsulation dot1Q 3103
+vrf forwarding 10
+ip address <IP ADDR> <IP ADDR>
+no ip redirects
+ip pim dr-priority 20
+ip pim sparse-mode
+ip nbar protocol-discovery
+bfd template bfd1
+arp timeout 1200
+!
+router omp
+!
+router ospf 65535
+router-id <IP ADDR>
+timers throttle spf 200 1000 10000
+!
+router bgp 655370
+bgp always-compare-med
+bgp log-neighbor-changes
+!
+address-family ipv4 vrf 10
+  bgp router-id <IP ADDR>
+  network <IP ADDR>
+  redistribute connected
+  redistribute omp
+  propagate-community
+  neighbor <IP ADDR> remote-as 65537
+  neighbor <IP ADDR> fall-over bfd
+  neighbor <IP ADDR> activate
+  neighbor <IP ADDR> send-community both
+  neighbor <IP ADDR> route-map OMP_TO_BGP_1000_MED out
+  neighbor <IP ADDR> remote-as 65537
+  neighbor <IP ADDR> fall-over bfd
+  neighbor <IP ADDR> activate
+  neighbor <IP ADDR> send-community both
+  neighbor <IP ADDR> route-map OMP_TO_BGP_1000_MED out
+  distance bgp 20 200 20
+exit-address-family
+!
+ip forward-protocol nd
+no ip forward-protocol udp
+!
+no ip http server
+no ip http secure-server
+no ip ftp passive
+ip route <IP ADDR> <IP ADDR> <IP ADDR>
+ip route <IP ADDR> <IP ADDR> <IP ADDR>
+ip route <IP ADDR> <IP ADDR> <IP ADDR>
+ip route <IP ADDR> <IP ADDR> <IP ADDR>
+ip nat settings central-policy
+ip nat settings gatekeeper-size 1024
+ip nat route vrf 65528 <IP ADDR> <IP ADDR> global
+ip nat translation tcp-timeout 3600
+ip nat translation udp-timeout 60
+no ip nat service all-algs
+ip nat inside source list nat-dia-vpn-hop-access-list interface GigabitEthernet0/0/0 overload
+ip nat inside source list nat-dia-vpn-hop-access-list interface GigabitEthernet0/0/2 overload
+ip nat inside source list nat-dia-vpn-hop-access-list interface GigabitEthernet0/0/3 overload
+no ip ssh bulk-mode
+ip scp server enable
+!
+logging trap syslog-format rfc5424
+logging source-interface Loopback10 vrf 10
+logging host <IP ADDR> vrf 10
+no ipv6 mld ssm-map query dns
+route-map OMP_TO_BGP_1000_MED permit 1
+ set metric 1000
+!
+route-map OMP_TO_BGP_1000_MED deny 65535
+!
+snmp-server engineID local <ENGINE_ID>
+snmp-server group <SNMP_GROUP> v3 priv read <SNMP_VIEW>
+snmp-server view <SNMP_VIEW> <OID> included
+snmp-server trap-source Loopback10
+snmp-server contact <EMAIL>
+snmp-server enable traps snmp authentication linkdown linkup coldstart warmstart
+snmp-server enable traps alarms informational
+snmp-server enable traps bulkstat collection transfer
+snmp-server enable traps ethernet cfm alarm
+snmp-server enable traps rf
+snmp-server enable traps transceiver all
+snmp-server enable traps vrfmib vrf-up vrf-down vnet-trunk-up vnet-trunk-down
+no network-clock revertive
+ntp source Loopback10
+ntp server vrf 10 <IP ADDR>
+ntp server vrf 10 <IP ADDR>
+!
+!
+!
+!
+!
+!
+!
+netconf-yang
+netconf-yang feature candidate-datastore
+end

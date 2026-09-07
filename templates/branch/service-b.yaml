@@ -1,0 +1,205 @@
+# templates/branch/service-b.yaml
+#
+# branch-b service profile — forked from templates/branch/service.yaml
+# (branch-a's version) on 2026-07-30, redesigned 2026-07-30 for CML:
+#   - CORP and INFRA are still fused into one VPN10 service with two BGP
+#     peers + two SVI handoffs, same as branch-a (see service.yaml header).
+#   - The difference from branch-a is HOW those two VNs reach the LAN:
+#     branch-a trunks both VLANs (plus the user VLAN) over one physical
+#     port; branch-b instead hands off CORP and INFRA on their OWN
+#     untagged access ports (CML's VMs cannot do 802.1Q trunking). Two
+#     switchport interfaces, `mode: access`, one per VN.
+#   - User VLAN 62 gets its OWN third access port too (restored 2026-07-30
+#     on Gi7), same reasoning as CORP/INFRA above — no trunk available, so
+#     each VLAN needs a dedicated untagged port.
+#
+# Only branch/service.yaml (branch-a) is a live-deployed design (BXT).
+# This file must stay independent of it — do not re-merge them back into
+# one shared file; a future branch-a change must not silently alter
+# branch-b's access-port design and vice versa.
+#
+# Same schema conventions as service.yaml (SCHEMA-VALIDATED 2026-07-24
+# against nac-sdwan 1.4.0, sdwan_features_service.tf) — see that file's
+# header for the full list of conventions (static `name:` per feature,
+# ipv4_neighbors for BGP, dhcp_server by-name reference, etc.). Switchport
+# `mode`/`access_vlan(_variable)` fields confirmed 2026-07-30 against
+# sdwan_service_switchport_feature in sdwan_features_service.tf — `mode`
+# has NO `_variable` form (constant only), access_vlan does.
+
+sdwan:
+  feature_profiles:
+    service_profiles:
+      - name: "SVC-__SITE__"
+        description: "Service profile - __SITE__"
+
+        # DHCP pools — associated to SVIs below by name
+        dhcp_servers:
+          # User VLAN 62 — same pool on both routers (VRRP pair)
+          - name: "DHCP-VLAN62"
+            pool_network_address_variable: vlan62_dhcp_pool
+            pool_subnet_mask: "255.255.255.0"      # /24
+            default_gateway_variable: vlan62_dhcp_gw
+            dns_servers: "__GLOBAL:dhcp.dns_servers__"
+          # PnP bootstrap VLAN 253 — per-router /29 pool
+          - name: "DHCP-VLAN253"
+            pool_network_address_variable: vlan253_dhcp_pool
+            pool_subnet_mask: "255.255.255.248"    # /29
+            default_gateway_variable: vlan253_dhcp_gw
+            dns_servers: "__GLOBAL:dhcp.dns_servers__"
+
+        # BGP toward the SDA border nodes — one neighbor per VN, same as
+        # branch-a's BGP-VPN10.
+        bgp_features:
+          - name: "BGP-VPN10"
+            as_number_variable: bgp_as_number
+            router_id_variable: bgp_router_id
+            ipv4_neighbors:
+              # ASSUMPTION 2026-08-18: route_policy_out applied to BOTH peers
+              # (corp + infra).  address_families is an ATTRIBUTE of the
+              # neighbor it belongs to — never its own `- ` list entry, or it
+              # becomes a third neighbor with no address/remote-as and vManage
+              # rejects the parcel (SCHVALID0001, data.neighbor[N]).
+              - address_variable: bgp_neighbor_corp
+                remote_as_variable: bgp_neighbor_remote_as
+                send_community: true
+                send_extended_community: true
+                address_families:
+                  - family_type: ipv4-unicast
+                    route_policy_out: "OMP_TO_BGP_1000_MED"
+              - address_variable: bgp_neighbor_infra
+                remote_as_variable: bgp_neighbor_remote_as
+                send_community: true
+                send_extended_community: true
+                address_families:
+                  - family_type: ipv4-unicast
+                    route_policy_out: "OMP_TO_BGP_1000_MED"
+            # ONE list entry carrying both keys — `- network_address` followed
+            # by `- subnet_mask` is two half-networks, each missing a required
+            # attribute.
+            ipv4_networks:
+              - network_address: '0.0.0.0'
+                subnet_mask: '0.0.0.0'
+
+        # ── Outbound BGP route-maps (added 2026-08-18) ──────────────────────
+        # Kept byte-identical with templates/branch/service.yaml and
+        # service-routed.yaml — see service.yaml for the full schema notes,
+        # the unconfirmed base_action/default_action values and the silent
+        # try() failure mode.  Prefix-list comes from
+        # templates/branch/policy-objects.yaml.
+        route_policies:
+          - name: "OMP_TO_BGP_1000_MED"
+            description: "Outbound to SDA border - set MED 1000"
+            default_action: reject
+            sequences:
+              - id: 1
+                name: "SET_MED"
+                base_action: accept
+                protocol: ipv4
+                actions:
+                  metric: 1000
+
+          # DEFINED BUT NOT ATTACHED — see service.yaml
+          - name: "OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB"
+            description: "Outbound to SDA border - MED 1000 + prepend on Bloomberg ranges"
+            default_action: reject
+            sequences:
+              - id: 1
+                name: "PREPEND_BB"
+                base_action: accept
+                protocol: ipv4
+                match_entries:
+                  # __SITE__ suffix mandatory — see service.yaml
+                  ipv4_address_prefix_list: "LO_BB_PFX-__SITE__"
+                actions:
+                  metric: 1000
+                  # 655370 = AS 10.10 asplain — self-prepend
+                  prepend_as_paths: [655370, 655370, 655370, 655370, 655370]
+              - id: 11
+                name: "SET_MED"
+                base_action: accept
+                protocol: ipv4
+                actions:
+                  metric: 1000
+
+        lan_vpns:
+          # The ONE branch service VPN
+          - name: "VPN10"
+            vpn_id: 10
+            bgp: "BGP-VPN10"
+
+            ethernet_interfaces:
+              # Loopback10: mgmt-plane source (TACACS/NTP/syslog per
+              # globals.yaml) and routing anchor
+              - name: "LOOPBACK10"
+                description: "Mgmt-plane source / routing anchor"
+                interface_name: "Loopback10"
+                shutdown_variable: loopback10_shutdown
+                # Required by provider when ipv4_address_variable is set.
+                ipv4_address_type: static
+                ipv4_address_variable: loopback10_ip
+                ipv4_subnet_mask: "255.255.255.255"   # /32 host route
+
+            svi_interfaces:
+              # CORP SVI: /30 uplink into the SDA CORP VN
+              - name: "SVI-CORP"
+                description: "SDA CORP VN handoff"
+                interface_description_variable: svi_corp_desc   # CLI description
+                interface_name_variable: svi_corp_ifname
+                shutdown_variable: svi_corp_shutdown
+                ipv4_address_variable: svi_corp_ip
+                ipv4_subnet_mask: "255.255.255.252"   # /30
+
+              # INFRA SVI: /30 uplink into the SDA INFRA VN
+              - name: "SVI-INFRA"
+                description: "SDA INFRA VN handoff"
+                interface_description_variable: svi_infra_desc  # CLI description
+                interface_name_variable: svi_infra_ifname
+                shutdown_variable: svi_infra_shutdown
+                ipv4_address_variable: svi_infra_ip
+                ipv4_subnet_mask: "255.255.255.252"   # /30
+
+              # User VLAN 62 — VRRP active/standby across the pair, same
+              # virtual IP and DHCP pool on both routers
+              - name: "SVI-VLAN62"
+                description: "User VLAN"
+                interface_description_variable: vlan62_desc     # CLI description
+                interface_name: "Vlan62"
+                ipv4_address_variable: vlan62_ip
+                ipv4_subnet_mask: "255.255.255.0"     # /24
+                ipv4_vrrp_groups:
+                  - id: 62
+                    address_variable: vlan62_vrrp_ip
+                dhcp_server: "DHCP-VLAN62"
+
+              # PnP bootstrap VLAN 253 — per-router /29, no VRRP
+              - name: "SVI-VLAN253"
+                description: "PnP bootstrap VLAN"
+                interface_description_variable: vlan253_desc    # CLI description
+                interface_name: "Vlan253"
+                ipv4_address_variable: vlan253_ip
+                ipv4_subnet_mask: "255.255.255.248"   # /29
+                dhcp_server: "DHCP-VLAN253"
+
+        # Campus handoff — THREE untagged access ports (one per VLAN)
+        # instead of branch-a's single trunk, since CML's VMs can't do
+        # 802.1Q. access_vlan_variable carries the numeric VLAN id for
+        # CORP/INFRA (3103/3113, 3101/3111 — per-router, same as the
+        # matching SVI above); VLAN 62 is the same id on both routers, so
+        # access_vlan is a static 62 (matches SVI-VLAN62's static
+        # interface_name: "Vlan62" above).
+        switchport_features:
+          - name: "SWITCHPORT-__SITE__"
+            description: "LAN access ports - __SITE__"
+            interfaces:
+              - name_variable: lan_corp_ifname
+                mode: access
+                access_vlan_variable: lan_corp_vlan
+                shutdown_variable: lan_corp_shutdown
+              - name_variable: lan_infra_ifname
+                mode: access
+                access_vlan_variable: lan_infra_vlan
+                shutdown_variable: lan_infra_shutdown
+              - name_variable: lan_vlan62_ifname
+                mode: access
+                access_vlan: 62
+                shutdown_variable: lan_vlan62_shutdown

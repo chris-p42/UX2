@@ -1,0 +1,52 @@
+# templates/branch/application-priority.yaml
+#
+# BRANCH-ONLY part of the Application Priority profile: the QoS scheduler.
+# The profile itself and both traffic policies (AAR + QoS classification) are
+# fabric-wide and live in templates/_shared/application-priority-common.yaml; the two
+# files merge into one APP-PRIORITY-__SITE__ profile (see the SPLIT ACROSS FILES
+# note in templates/_shared/policy-objects-common.yaml).
+#
+# Source: UX1 localized qosMap LO_QOSMAP_V2, from LO_BR_local_Policy_BGP.
+# Forwarding classes are declared in templates/_shared/policy-objects-common.yaml.
+#
+# scheduling_type is derived by the module, not written here: queue 0 -> llq,
+# every other queue -> wrr (sdwan_features_application_priority.tf).  The
+# `burst` value UX1 sets on queue 0 (15000) is not exposed by nac-sdwan 1.4.0.
+#
+# TODO verify at the first terraform plan: target_interfaces is left unset, so
+# the scheduler applies to every WAN interface.  If vManage requires an explicit
+# target, add target_interfaces_variable here and the matching key to each
+# router's device_variables in values/.
+
+sdwan:
+  feature_profiles:
+    application_priority_profiles:
+      - name: "APP-PRIORITY-__SITE__"
+
+        # Bandwidth split: 33+7+10+10+10+5+25 = 100%.  Branch has no queue 1
+        # (LO_QOSMAP_V2 does not use it) — that is a DC-only queue.
+        qos_policies:
+          - name: "QOS-__SITE__"
+            description: "QoS scheduler - __SITE__ (LO_QOSMAP_V2)"
+            qos_schedulers:
+              - forwarding_class: "LO_VOICE-__SITE__"        # queue 0 — LLQ 33%
+                bandwidth_percent: 33
+                drops: tail-drop
+              - forwarding_class: "LO_CONTROL-__SITE__"      # queue 2 — WRR 7%
+                bandwidth_percent: 7
+                drops: tail-drop
+              - forwarding_class: "LO_REAL-TIME-__SITE__"    # queue 3 — WRR 10%
+                bandwidth_percent: 10
+                drops: tail-drop
+              - forwarding_class: "LO_MULTIMEDIA-__SITE__"   # queue 4 — WRR 10%
+                bandwidth_percent: 10
+                drops: tail-drop
+              - forwarding_class: "LO_APPLICATIONS-__SITE__" # queue 5 — WRR 10% WRED
+                bandwidth_percent: 10
+                drops: red-drop
+              - forwarding_class: "LO_DATA-__SITE__"         # queue 6 — WRR 5% WRED
+                bandwidth_percent: 5
+                drops: red-drop
+              - forwarding_class: "LO_BESTEFFORT-__SITE__"   # queue 7 — WRR 25%
+                bandwidth_percent: 25
+                drops: tail-drop

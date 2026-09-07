@@ -1,0 +1,18 @@
+# templates/dc/config-group.yaml
+#
+# Same as branch/config-group.yaml but includes the CLI profile (the DC
+# campus LAG is a CLI add-on — see templates/dc/cli.yaml).
+#
+# SCHEMA-VALIDATED 2026-07-24 — see branch/config-group.yaml header for the
+# structure notes (type-specific profile keys; policy group attaches
+# per-router in site-values.yaml, not here).
+
+sdwan:
+  configuration_groups:
+    - name: "CG-__SITE__"
+      description: "Config group - __SITE__ (DC hub)"
+      system_profile: "SYS-__SITE__"
+      transport_profile: "TRANS-__SITE__"
+      service_profile: "SVC-__SITE__"
+      cli_profile: "CLI-__SITE__"
+      policy_object_profile: "PO-__SITE__"

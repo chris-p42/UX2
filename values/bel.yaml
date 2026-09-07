@@ -1,0 +1,171 @@
+# values/bel.yaml
+#
+# DC hub site — lab site-id 1 (NOT the production site-id from the UX1 export).
+# Device template: LO_DC_DEVICE_TEMPLATE_V1.2
+# Hardware       : Cisco Catalyst C8500-12X pair (vedge-C8500-12X)
+# Variant        : dc (3 TLOCs, VPN 512 OOB management, NO TLOC-EXT —
+#                  intentional, never add one back; confirmed from UX1 export)
+#
+# Two routers — primary (router1) and secondary (router2).
+# IPsec preference: primary router takes 200 (preferred), secondary takes 100.
+#
+# RECONSTRUCTED 2026-07-29 from the hand-placed sites/bel/data/site-values.yaml
+# (which generate.py could never reproduce — sites/ is generated output, the
+# source of truth is THIS file).  Upgraded to match every fix live-proven on
+# BXT (live-validated on BXT 2026-07-29):
+#   - pseudo_commit_timer: 0 per router (required config-group system
+#     variable; NOT the deploy gate — that stays configuration_group_deploy)
+#   - chassis_id explicit per router (required for device attach)
+#
+# DESIGN CORRECTION (user, 2026-08-07): DC hub LAN side is OSPF-only, no
+# BGP — bgp_as_number/bgp_router_id/bgp_neighbor_core/bgp_neighbor_remote_as
+# removed (were briefly added 2026-08-07 mirroring the branch BGP model;
+# see templates/dc/service.yaml header). vpn10_ospf_router_id remains the
+# routing-anchor id for OSPF.
+#
+# Anonymised placeholder strings (ROUTER_ID_*, BGP_*, CHASSIS_ID_*, GPS_*,
+# PUBLIC_INET*, MPLS_INET*) must be filled in with real values before
+# deploying.  generate.py warns about every one it finds in the rendered
+# output; use --strict to make that a hard failure.
+
+site_code: BEL
+variant: dc
+site_id:  1             # must match device_variables.*.site_id (enforced by generate.py)
+
+device_variables:
+  router1:
+    hostname: SD-WAN01
+    system_ip: 10.0.0.1
+    site_id:  1
+    pseudo_commit_timer: 0  # config-group system variable; not a deploy gate
+    chassis_id: C8K-3D1A8960-6E76-532C-DA93-50626FC5797E   # REQUIRED: real chassis/serial from vManage
+
+    # System
+    port_offset: '0'
+    timezone: Europe/Zurich
+    gps_lat: 46.18948
+    gps_lon: 6.11208
+
+    # VPN 512 — OOB management (GigabitEthernet0 on the C8500-12X)
+    vpn512_ifname: GigabitEthernet6
+    vpn512_ip: 172.31.152.168
+    vpn512_mask: 255.255.248.0
+    vpn512_gateway: 172.31.159.254
+
+    # VPN 0 — DNS (Internet-side resolvers)
+    vpn0_dns_primary: 172.16.1.254 
+    vpn0_dns_secondary: 172.16.2.254
+
+    # VPN 0 — default-route next-hops (one per upstream; MPLS is active on BXT branch-a)
+    vpn0_gw_inet1: 172.16.1.254  # ISP1 gateway
+    vpn0_gw_inet2: 172.16.3.254  # ISP2 gateway
+    vpn0_gw_mpls: 172.16.2.254   # MPLS 1 next-hop
+
+    # VPN 0 — Internet 1 (always up at the DC: no shutdown variable)
+    vpn0_inet1_ifname: GigabitEthernet1
+    vpn0_inet1_ip: 172.16.1.130
+    vpn0_inet1_mask: 255.255.255.0 #not decimal
+    vpn0_inet1_bw_down: '1000000'  # kbps
+    vpn0_inet1_shape: '1000000'    # kbps
+    vpn0_inet1_color: custom1
+    vpn0_inet1_pref: '200'         # higher preference on primary router
+    vpn0_inet1_nat: 'true'        # DIA NAT overload on this WAN if ('true'/'false')
+    vpn0_inet1_desc: BEL ISP1   # port description
+    vpn0_inet1_shutdown: 'false'
+
+    # VPN 0 — Internet 2
+    vpn0_inet2_ifname: GigabitEthernet3
+    vpn0_inet2_ip: 172.16.3.130
+    vpn0_inet2_mask: 255.255.255.0 #not decimal
+    vpn0_inet2_bw_down: '1000000'
+    vpn0_inet2_shape: '1000000'
+    vpn0_inet2_color: custom2
+    vpn0_inet2_pref: '200'
+    vpn0_inet2_nat: 'true'        # DIA NAT overload on this WAN if ('true'/'false')
+    vpn0_inet2_desc: BEL ISP2   # port description
+    vpn0_inet2_shutdown: 'false'
+
+    # VPN 0 — MPLS hub uplink (color private1; spokes' private TLOCs land here)
+    vpn0_mpls_ifname: GigabitEthernet2
+    vpn0_mpls_ip: 172.16.2.130
+    vpn0_mpls_mask: 255.255.255.0
+    vpn0_mpls_bw_down: '1000000'
+    vpn0_mpls_shape: '1000000'
+    vpn0_mpls_color: private1
+    vpn0_mpls_pref: '200'
+    vpn0_mpls_shutdown: 'false'   # MPLS link is live on router1
+    vpn0_mpls_desc: BEL MPLS 1   # port description
+
+    # VPN 10 — Loopback10 (/32 static in template) and routing (OSPF only)
+    loopback10_ip: 10.0.0.100
+    loopback10_mask: 255.255.255.255
+    vpn10_ospf_router_id: 10.0.0.100
+    vpn10_ospf_area: '10'
+
+  router2:
+    hostname: SD-WAN02
+    system_ip: 10.0.0.2
+    site_id: 1
+    pseudo_commit_timer: 0  # config-group system variable; not a deploy gate
+    chassis_id: C8K-D4CE7174-5261-7E6F-91EA-4926BCF4C2DD   # REQUIRED: real chassis/serial from vManage
+
+    port_offset: '1'
+    timezone: Europe/Zurich
+    gps_lat: 46.18948
+    gps_lon: 6.11208
+
+    # VPN 512 — OOB management (GigabitEthernet0 on the C8500-12X)
+    vpn512_ifname: GigabitEthernet6
+    vpn512_ip: 172.31.152.68
+    vpn512_mask: 255.255.248.0
+    vpn512_gateway: 172.31.159.254
+
+    # VPN 0 — DNS (Internet-side resolvers)
+    vpn0_dns_primary: 172.16.1.254 
+    vpn0_dns_secondary: 172.16.2.254
+
+    # VPN 0 — default-route next-hops (one per upstream; MPLS is active on BXT branch-a)
+    vpn0_gw_inet1: 172.16.1.254  # ISP1 gateway
+    vpn0_gw_inet2: 172.16.3.254  # ISP2 gateway
+    vpn0_gw_mpls: 172.16.2.254   # MPLS 1 next-hop
+
+    # VPN 0 — Internet 1 (always up at the DC: no shutdown variable)
+    vpn0_inet1_ifname: GigabitEthernet1
+    vpn0_inet1_ip: 172.16.1.131
+    vpn0_inet1_mask: 255.255.255.0 #not decimal
+    vpn0_inet1_bw_down: '1000000'  # kbps
+    vpn0_inet1_shape: '1000000'    # kbps
+    vpn0_inet1_color: custom1
+    vpn0_inet1_pref: '200'         # higher preference on primary router
+    vpn0_inet1_nat: 'true'        # DIA NAT overload on this WAN if ('true'/'false')
+    vpn0_inet1_desc: BEL ISP1   # port description
+    vpn0_inet1_shutdown: 'false'
+
+    # VPN 0 — Internet 2
+    vpn0_inet2_ifname: GigabitEthernet3
+    vpn0_inet2_ip: 172.16.3.131
+    vpn0_inet2_mask: 255.255.255.0 #not decimal
+    vpn0_inet2_bw_down: '1000000'
+    vpn0_inet2_shape: '1000000'
+    vpn0_inet2_color: custom2
+    vpn0_inet2_pref: '200'
+    vpn0_inet2_nat: 'true'        # DIA NAT overload on this WAN if ('true'/'false')
+    vpn0_inet2_desc: BEL ISP2   # port description
+    vpn0_inet2_shutdown: 'false'
+
+    # VPN 0 — MPLS hub uplink (color private1; spokes' private TLOCs land here)
+    vpn0_mpls_ifname: GigabitEthernet2
+    vpn0_mpls_ip: 172.16.2.131
+    vpn0_mpls_mask: 255.255.255.0
+    vpn0_mpls_bw_down: '1000000'
+    vpn0_mpls_shape: '1000000'
+    vpn0_mpls_color: private1
+    vpn0_mpls_pref: '200'
+    vpn0_mpls_shutdown: 'false'   # MPLS link is live on router1
+    vpn0_mpls_desc: BEL MPLS 1   # port description
+    
+
+    loopback10_ip: 10.0.0.200
+    loopback10_mask: 255.255.255.255
+    vpn10_ospf_router_id: 10.0.0.200
+    vpn10_ospf_area: '10'

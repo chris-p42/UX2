@@ -1,0 +1,32 @@
+# templates/dc/policy-objects.yaml
+#
+# DC-ONLY policy objects.  Everything the DC shares with the branches (profile
+# name, SLA classes, application lists, data prefix lists and the seven common
+# forwarding classes) lives in templates/_shared/policy-objects-common.yaml; the two
+# files merge into one PO-__SITE__ profile — see the SPLIT ACROSS FILES note
+# there.
+#
+# Only one object is genuinely DC-specific: queue 1.  The branch scheduler
+# (LO_QOSMAP_V2) has no queue 1 at all, while the DC scheduler (LO_QOSMAP V1)
+# gives it 20% under the name LO_VIDEO.  Nothing classifies into it — neither
+# UX1 data policy sets LO_VIDEO — but the queue and its bandwidth are real, so
+# the class is declared to keep the DC scheduler faithful to UX1.
+#
+# The four other UX1 DC class names (LO_DEFAULT, LO_STREAMING, LO_TRANSACTIONAL,
+# LO_SCAVENGER) are NOT declared: they were second names for queues 2/3/4/7,
+# which the data policy already fills as LO_CONTROL / LO_REAL-TIME /
+# LO_MULTIMEDIA / LO_BESTEFFORT.  See the header of dc/application-priority.yaml.
+#
+# DC route policies (OMP_TO_OSPF_MED_1000, OMP_TO_OSPF_MED_1020) are in
+# templates/dc/service.yaml.  They match no prefix list, so the DC needs no
+# equivalent of the branch's LO_BB_PFX.
+#
+# BEL is placeholder-blocked — never plan or apply this site until all
+# chassis_id / IP / BGP AS placeholders are filled in values/bel.yaml.
+
+sdwan:
+  feature_profiles:
+    policy_object_profile:
+      forwarding_classes:
+        - name: "LO_VIDEO-__SITE__"
+          queue: 1

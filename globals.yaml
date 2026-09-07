@@ -1,8 +1,195 @@
-org_name: acme-corp
-vmanage_url: https://vmanage.acme.corp
-sdwan_as: 65000                     # Uniform SD-WAN AS — every site, every region
-campus_as: 65100                    # Uniform campus AS — every site, every region
-dc_hub:                             # Read-only reference for regional topology policies
-  site_id: 100                      # NOT a managed resource outside regions/dc-hub/
-  system_ip_a: 10.0.0.1
-  system_ip_b: 10.0.0.2
+# globals.yaml
+#
+# Single source of truth for values that are GENUINELY IDENTICAL across the
+# entire fabric — every site, every variant (dc / branch-a / branch-b).
+#
+# Referenced from templates/ via `__GLOBAL:<dotted.key>__` placeholders.
+# generate.py substitutes them at render time with type preserved: a list
+# stays a list, a dict stays a dict, never stringified.  An unknown key fails
+# the generation immediately with a clear error — it never silently guesses.
+#
+# Rule: only add a value here if you can confirm it is the SAME in both the
+# DC template (LO_DC_DEVICE_TEMPLATE_V1.2) and the branch template
+# (LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0).  Anything that differs by
+# variant belongs in templates/dc/ or templates/branch/ instead.
+#
+# 2026-07-24 — validated against nac-sdwan 1.4.0 module source
+# (module source available after terraform init: sites/*/.terraform/modules/sdwan/).  Inner key names below now match what the
+# module consumes (hostname_ip / vpn_id / severity ...).  Removed in that
+# pass, with reasons:
+#   aaa.*     — auth order references the TACACS group name, which is
+#               variant-specific (tacacs-10 vs tacacs-512, auto-derived by
+#               the module from the group VPN).  Moved to
+#               templates/branch/aaa_tacacs.yaml and templates/dc/aaa_tacacs.yaml.
+#   dns.*     — no system-level DNS parcel exists in UX2; DNS is per-VPN
+#               (wan_vpn.ipv4_primary_dns_address).  Now wired via the
+#               vpn0_dns_primary/secondary device variables in transport.
+#   logging.disk_enabled — no such field in the module (only
+#               disk_file_rotate / disk_file_size exist).
+#   attach.pseudo_commit_timer — not a fabric-global template value. It is
+#               emitted per router from values/<site>.yaml as a required
+#               config-group system device variable; deployment remains
+#               controlled by configuration_group_deploy (see generate.py).
+#
+# Anonymised placeholders are kept as-is — substitute real values before
+# running terraform plan (generate.py warns about every one it finds).
+
+# ---------------------------------------------------------------------------
+# NTP
+# Source: LO_DC_NTP and LO_BR_NTP — identical: same two server hostnames,
+# VPN 10, source Loopback10.
+# Schema: system_profiles[].ntp.servers[] {hostname_ip, vpn_id,
+# source_interface} — validated against sdwan_features_system.tf.
+# Both server names are anonymised in the export — fill in real FQDNs/IPs.
+# ---------------------------------------------------------------------------
+ntp:
+  servers:
+    - hostname_ip: "10.253.65.1"
+      vpn_id: 10
+      source_interface: "Loopback10"
+    - hostname_ip: "10.253.65.10"
+      vpn_id: 10
+      source_interface: "Loopback10"
+
+# ---------------------------------------------------------------------------
+# Logging (syslog)
+# Source: LO_DC_SYSLOG and LO_BR_SYSLOG — identical: same anonymised server
+# hostname, VPN 10, source Loopback10, severity = information.
+# Schema: system_profiles[].logging.ipv4_servers[] {hostname_ip, vpn_id,
+# source_interface, severity} — validated.
+# Fill in the real syslog server address before applying.
+# ---------------------------------------------------------------------------
+logging:
+  ipv4_servers:
+    - hostname_ip: "10.253.90.200"    # fill in real FQDN or IP
+      vpn_id: 10
+      source_interface: "Loopback10"
+      severity: "informational"         # minimum severity to forward
+
+# ---------------------------------------------------------------------------
+# SNMP
+# Source: LO_snmp_v3-2026 — SAME TEMPLATE ID on both DC and branch
+# (4a59a94c-7d32-4655-ad88-8f8d336d5f68).  SNMPv3, auth-priv (SHA + AES-128),
+# view snmp_v3_orion (OID 1.3.6.1), group V3Group.
+# Schema: system_profiles[].snmp.{contact_person, views, groups, users} —
+# validated against nac-sdwan 1.4.0 + the netascode data model
+# (features_system/system_snmp).  Modelled 2026-07-29.
+# The names below are fabric-wide identical; the v3 USER entries (names +
+# passwords, per-user data) live in templates/_shared/system.yaml, where
+# the passwords are deliberately BLOCKING placeholders — secrets are never
+# stored here.
+# ---------------------------------------------------------------------------
+snmp:
+  contact: "telecom.all@lombardodier.com"
+  view: "snmp_v3_orion"       # v3 view name (monitoring/Orion)
+  view_oid: "1.3.6.1"         # OID subtree the view exposes (iso.org.dod.internet)
+  group: "V3Group"            # v3 group — auth-priv, bound to the view above
+
+# ---------------------------------------------------------------------------
+# Banner (MOTD)
+# Source: LO_banner-motd — SAME TEMPLATE ID on both DC and branch
+# (bd167fc4-6622-4e68-9754-cba9d715c42d).  The UX1 template sets the MOTD
+# field (vipType:constant); the login banner is vipType:ignore (not pushed).
+# Schema: system_profiles[].banner.motd — validated (banner.login also
+# exists but is unused, matching UX1).
+# ---------------------------------------------------------------------------
+banner:
+  motd: >-
+    This system is to be logged in to or used only by specifically authorized
+    personnel. Any unauthorized use of the system is unlawfull, and may be
+    subject to civil and/or criminal penalties. Any use of the system may be
+    logged or monitored without further notice, and the resulting logs may be
+    used as evidence in court.
+
+# ---------------------------------------------------------------------------
+# BFD (Bidirectional Forwarding Detection — app-route probe)
+# Source: LO_DC_BFD and LO_BR_BFD — confirmed identical values on both.
+#   multiplier    5       (number of missed hellos before path declared down)
+#   poll_interval 120000  (milliseconds between probes — 2 minutes)
+# Schema: system_profiles[].bfd.{multiplier, poll_interval} — validated.
+# ---------------------------------------------------------------------------
+bfd:
+  multiplier: 5
+  poll_interval: 120000  # milliseconds (2 min); UX1 field: bfd_poll_interval
+
+# ---------------------------------------------------------------------------
+# OSPF — fabric-wide tuning, identical for ALL sites (user requirement
+# 2026-07-29: "OSPF configuration must be configurable globally").
+# Referenced from every ospf_features entry (branch VPN-0 underlay OSPF in
+# templates/branch/transport-a.yaml, DC VPN-10 OSPF in templates/dc/
+# service.yaml) via __GLOBAL:ospf.<key>__ — change once here, regenerate,
+# every site picks it up.
+# Data model: https://netascode.cisco.com/docs/data_models/sdwan/
+#   features_transport/transport_ospf/ (service OSPF consumes the same keys
+#   — verified against nac-sdwan 1.4.0 module source).
+# All values below ARE the vManage defaults — making them explicit changes
+# nothing on the wire today, it only makes them tunable from one place.
+# ---------------------------------------------------------------------------
+ospf:
+  reference_bandwidth: 100          # Mbps used for auto-cost (vManage default)
+  spf_calculation_delay: 200        # ms before SPF runs after a change
+  spf_initial_hold_time: 1000       # ms initial hold between SPF runs
+  spf_maximum_hold_time: 10000      # ms max hold between SPF runs
+  interface:                        # per-adjacency timers (applied on every
+    hello_interval: 10              #   OSPF-enabled interface) — seconds
+    dead_interval: 40               # seconds (4x hello, vManage default)
+    lsa_retransmit_interval: 5      # seconds (vManage default)
+
+# ---------------------------------------------------------------------------
+# QoS DSCP class-map values
+# IMPORTANT: these MUST be decimal integers — the SD-WAN provider rejects
+# PHB keywords ("ef", "af31", "default").  Never change to string form.
+#   EF   = Expedited Forwarding  (real-time voice/video)
+#   AF31 = Assured Forwarding 31 (business-critical data)
+#   CS0  = default / best-effort
+# Currently UNREFERENCED: the per-site policy-object QoS model was removed
+# after schema validation (the policy_object_profile is a single global
+# object and QoS maps live in application_priority_profiles).
+# Kept for the future app-priority modelling.
+# ---------------------------------------------------------------------------
+qos_dscp:
+  ef:      46   # 101110b
+  af31:    26   # 011010b
+  default:  0   # 000000b (CS0 / best-effort)
+
+# ---------------------------------------------------------------------------
+# DHCP — fabric-wide DHCP server settings (all branch service VPNs)
+# Applied via __GLOBAL:dhcp.dns_servers__ in templates/branch/service*.yaml.
+# Fill in real DNS server IP(s) before running terraform plan.
+# ---------------------------------------------------------------------------
+dhcp:
+  dns_servers:
+    - "10.10.10.10"
+
+# ---------------------------------------------------------------------------
+# Commvault replication and backup servers
+# Referenced by Application Priority traffic_policy data prefix lists
+# (LO_COMMVAULT_SIN_SERVER, LO_COMMVAULT_SERVERS, LO_BACKUP_SERVERS).
+# Fill in real CIDRs before running generate.py on the jump host.
+# ---------------------------------------------------------------------------
+commvault:
+  sin_server_prefixes:
+    - "COMMVAULT_SIN_SERVER_IP/32"   # fill in real CIDR
+  server_prefixes:
+    - "COMMVAULT_SERVER_IP/32"       # fill in real CIDR
+backup:
+  server_prefixes:
+    - "BACKUP_SERVER_IP/32"          # fill in real CIDR
+
+# ---------------------------------------------------------------------------
+# QoS classification hosts
+# Referenced by the QoS classification traffic policy (QOSCLASS-<SITE>) in
+# templates/_shared/application-priority.yaml, via the data prefix lists
+# LO_TUBE_SERVER / LO_SCAVENGER_HOSTS.
+#   tube_server_prefixes     internal video portal — its traffic (source ports
+#                            443/8443) goes to the multimedia queue, pinned to
+#                            the internet colors.
+#   scavenger_host_prefixes  hosts whose traffic is demoted to the data queue.
+# Both were anonymised in the vManage export (DATA/policies.json shows only
+# <IPADDRESS>) — fill in the real CIDRs before running generate.py --strict.
+# ---------------------------------------------------------------------------
+qos_hosts:
+  tube_server_prefixes:
+    - "TUBE_SERVER_IP/32"          # fill in real CIDR
+  scavenger_host_prefixes:
+    - "SCAVENGER_HOST_IP/32"       # fill in real CIDR

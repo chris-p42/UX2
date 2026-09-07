@@ -1,0 +1,172 @@
+# templates/dc/transport.yaml
+#
+# DC hub transport: 3 TLOCs (2x Internet + MPLS hub side) and deliberately
+# NO TLOC-EXT — never add one back here; that's intentional per the fabric
+# design, not an oversight.  Modelled from the UX1 export of
+# LO_DC_DEVICE_TEMPLATE_V1.2 (site BEL, C8500-12X pair).
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0 — same conventions as
+# the branch transport templates (static `name:` per interface,
+# `<field>_variable:` for per-device values).
+#
+# 2026-07-29 — brought in line with the fixes proven on BXT (live-validated
+# 2026-07-29):
+#   - Every Ethernet interface that declares `ipv4_address_variable` now
+#     also sets `ipv4_address_type: static`.  Without it the provider
+#     drops the address variable from the configuration-group schema and
+#     produces recurring refresh drift (`static -> null`).
+#
+# Unlike branch-a, the DC values carry no per-interface shutdown or MPLS
+# preference variables (hub circuits are always up) — those fields are
+# omitted rather than referencing variables that don't exist.
+#
+# VPN 512 = out-of-band management: GigabitEthernet0 (dedicated OOB port on
+# the C8500-12X) with its own default route.  TACACS and SSH ride this path
+# so the box stays reachable with the overlay down (see dc/aaa_tacacs.yaml —
+# the TACACS group sources from VPN 512).  The management VPN is implicitly
+# 512; no vpn_id field exists.
+#
+# KNOWN vManage LIMITATION: bandwidth_downstream / shaping_rate are parcel
+# metadata only — 20.13 UX2 never renders them into cEdge CLI (constant or
+# variable; validated live on BXT 2026-07-29, see branch/transport-a.yaml
+# header).  If needed on-device at the DC, add the lines to the CLI add-on
+# (templates/dc/cli.yaml).
+#
+# 2026-08-07 — every interface netmask is now a DEVICE VARIABLE
+# (ipv4_subnet_mask_variable), matching the branch templates: no mask is
+# hardcoded here.  Previously INET1/INET2/MPLS carried inline ALL_CAPS
+# placeholder masks (PUBLIC_INET1_MASK / PUBLIC_INET2_MASK /
+# MPLS_INET1_MASK) that no values/ variable could ever override, and VPN
+# 512 carried a static /21.  Confirmed supported by nac-sdwan 1.4.0:
+# sdwan_features_transport.tf:954 (wan_vpn ethernet) and :634
+# (management_vpn ethernet).
+#
+# 2026-08-07 — DC WAN addressing is DERIVED FROM BXT (user decision): same
+# subnets, same gateways, host octet +100 (BXT .30/.31 -> BEL .130/.131),
+# BXT's /24 masks.  All values live in values/bel.yaml; nothing is
+# hardcoded here.
+#
+# TODO: that addressing is derived, NOT taken from a real DC export — verify
+# against the live DC config before deploy.  The remaining blocking
+# placeholders in values/bel.yaml (ROUTER_ID_*, CHASSIS_ID_*, GPS_*) still
+# gate a deploy via the generate.py placeholder scan.
+
+sdwan:
+  feature_profiles:
+    transport_profiles:
+      - name: "TRANS-__SITE__"
+        description: "Transport profile - __SITE__ (DC hub, 3 TLOCs, no TLOC-EXT)"
+
+        # VPN 0 — transport VPN (implicitly VPN 0; no vpn_id field exists)
+        wan_vpn:
+          # Transport-side resolvers (per-device vars)
+          ipv4_primary_dns_address_variable: vpn0_dns_primary
+          ipv4_secondary_dns_address_variable: vpn0_dns_secondary
+
+          # One 0.0.0.0/0 with a next-hop per upstream — same shape as
+          # branch-a (transport-a.yaml), minus the TLOC-EXT relay next-hop
+          # since the DC has no TLOC-EXT.
+          #
+          # ADDED 2026-08-07: VPN 0 previously had NO default route at all
+          # (only VPN 512 OOB had one), so none of the three TLOCs had a
+          # path out — the C8500s could not have reached vBond/vManage/
+          # vSmart.  Never caught at runtime because BEL has never been
+          # planned or applied.
+          # Schema: next_hops[].address_variable — sdwan_features_transport.tf:766.
+          ipv4_static_routes:
+            - network_address: "0.0.0.0"
+              subnet_mask: "0.0.0.0"
+              next_hops:
+                - address_variable: vpn0_gw_inet1   # ISP1 gateway
+                - address_variable: vpn0_gw_inet2   # ISP2 gateway
+                - address_variable: vpn0_gw_mpls    # MPLS hub next-hop
+
+          ethernet_interfaces:
+
+            # --- Internet 1 ---
+            - name: "INET1"
+              description: "DC Internet 1 uplink"
+              # CLI port description — device variable (values/bel.yaml);
+              # no DC UX1 export was available, so the seeded strings are
+              # generic — verify against the live DC config before deploy.
+              interface_description_variable: vpn0_inet1_desc
+              interface_name_variable: vpn0_inet1_ifname
+              # Required by the provider when ipv4_address_variable is set
+              # (BXT live-validation finding, 2026-07-27).
+              ipv4_address_type: static
+              shutdown_variable: vpn0_inet1_shutdown
+              ipv4_address_variable: vpn0_inet1_ip
+              ipv4_subnet_mask_variable: vpn0_inet1_mask
+              bandwidth_downstream_variable: vpn0_inet1_bw_down
+              shaping_rate_variable: vpn0_inet1_shape
+              # DIA NAT (requirement 2026-07-29): per-router on/off via the
+              # vpn0_inet1_nat device variable ('true'/'false' in values/);
+              # type `interface` = overload on the WAN address.
+              ipv4_nat_variable: vpn0_inet1_nat
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_inet1_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_inet1_pref   # 200 r1 / 100 r2
+                # Flat allow_service_* keys are the canonical NaC 1.4.0 form —
+                # see templates/branch/transport-a.yaml INET1 note.
+                allow_service_https: false
+                allow_service_ospf: false    # no VPN-0 OSPF at the DC
+
+            # --- Internet 2 ---
+            - name: "INET2"
+              description: "DC Internet 2 uplink"
+              interface_description_variable: vpn0_inet2_desc   # CLI port description
+              interface_name_variable: vpn0_inet2_ifname
+              ipv4_address_type: static
+              shutdown_variable: vpn0_inet2_shutdown
+              ipv4_address_variable: vpn0_inet2_ip
+              ipv4_subnet_mask_variable: vpn0_inet2_mask
+              bandwidth_downstream_variable: vpn0_inet2_bw_down
+              shaping_rate_variable: vpn0_inet2_shape
+              # DIA NAT — see INET1 note
+              ipv4_nat_variable: vpn0_inet2_nat
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_inet2_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_inet2_pref
+                allow_service_https: false
+                allow_service_ospf: false
+
+            # --- MPLS hub uplink (color private1 — spokes' private1/private2
+            #     TLOCs land here) ---
+            - name: "MPLS"
+              description: "DC MPLS hub uplink"
+              interface_description_variable: vpn0_mpls_desc    # CLI port description
+              interface_name_variable: vpn0_mpls_ifname
+              ipv4_address_type: static
+              shutdown_variable: vpn0_mpls_shutdown
+              ipv4_address_variable: vpn0_mpls_ip
+              ipv4_subnet_mask_variable: vpn0_mpls_mask
+              bandwidth_downstream_variable: vpn0_mpls_bw_down
+              shaping_rate_variable: vpn0_mpls_shape
+              tunnel_interface:
+                color_variable: vpn0_mpls_color
+                ipsec_preference_variable: vpn0_mpls_pref
+                ipsec_encapsulation: true
+                allow_service_https: false
+                # No VPN-0 OSPF toward the MPLS PE at the DC (unlike
+                # branch-a) — flip to true if that changes.
+                allow_service_ospf: false
+
+        # VPN 512 — out-of-band management (DC only; branches have no OOB VPN)
+        management_vpn:
+          ethernet_interfaces:
+            - name: "MGMT"
+              description: "OOB management (VPN 512)"
+              interface_description_variable: vpn512_desc       # CLI port description
+              interface_name_variable: vpn512_ifname   # GigabitEthernet0
+              ipv4_address_type: static
+              ipv4_address_variable: vpn512_ip
+              ipv4_subnet_mask_variable: vpn512_mask
+          ipv4_static_routes:
+            - network_address: "0.0.0.0"
+              subnet_mask: "0.0.0.0"
+              next_hops:
+                - address_variable: vpn512_gateway
