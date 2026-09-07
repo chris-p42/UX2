@@ -1,0 +1,12 @@
+# Rename to backend.tf (per site, or add site-specific key here) to use a
+# remote backend instead of local state. Local state is the default in this
+# scaffold - fine for a lab/pilot, but for 5 independent site states you'll
+# likely want each site's key to include its own site_code, e.g.:
+#
+# terraform {
+#   backend "s3" {
+#     bucket = "your-tfstate-bucket"
+#     key    = "sdwan/nac4/<SITE_CODE>/terraform.tfstate"
+#     region = "us-east-1"
+#   }
+# }

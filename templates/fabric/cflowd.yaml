@@ -1,0 +1,59 @@
+# templates/fabric/cflowd.yaml
+#
+# Fabric-wide centralized cflowd policy.
+# Deployed to sites/fabric/ — the only root in this repo that holds
+# centralized (vManage-side) policies rather than per-device config groups.
+# Applied independently from sites/bel/, sites/bxt/, sites/cml/: centralized
+# policies are tenant-global objects; rendering one per site would trigger
+# PPARC0012 on the second apply.
+#
+# SCHEMA-VALIDATED against nac-sdwan 1.4.0:
+#   sdwan_cflowd_policy_definition    — sdwan_centralized_policies.tf:562
+#   sdwan_site_list_policy_object     — sdwan_classic_policy_objects.tf:90
+#   sdwan_centralized_policy          — sdwan_centralized_policies.tf:10
+#
+# Activation: `activated_policy` is intentionally absent. To activate:
+#   centralized_policies:
+#     activated_policy: LO_Fabric_Policy
+# Add this key deliberately — do NOT bake it into the template.
+#
+# TODO: fill in cflowd.collector_ip in globals.yaml before applying.
+# TODO: verify export_spreading value accepted by this vManage version.
+
+sdwan:
+  policy_objects:
+    site_lists:
+      - name: ALL_SD_WAN_SITES
+        site_ids:
+          - 1   # BEL — DC hub (lab site_id; production differs)
+          - 3   # BXT — branch-a-routed, C8200L test lab
+          - 5   # CML — branch-b-routed
+
+  centralized_policies:
+    definitions:
+      data_policy:
+        cflowd:
+          - name: LO_CFlowd_Policy
+            description: "CFlowd — NetFlow/IPFIX export to collector"
+            active_flow_timeout: "__GLOBAL:cflowd.active_flow_timeout__"
+            inactive_flow_timeout: "__GLOBAL:cflowd.inactive_flow_timeout__"
+            sampling_interval: "__GLOBAL:cflowd.sampling_interval__"
+            flow_refresh: "__GLOBAL:cflowd.flow_refresh__"
+            protocol: ipv4
+            tos: true
+            remarked_dscp: true
+            collectors:
+              - vpn: "__GLOBAL:cflowd.vpn__"
+                ip_address: "__GLOBAL:cflowd.collector_ip__"
+                port: "__GLOBAL:cflowd.port__"
+                transport: "__GLOBAL:cflowd.transport__"
+                source_interface: "__GLOBAL:cflowd.source_interface__"
+                export_spreading: enable
+
+    feature_policies:
+      - name: LO_Fabric_Policy
+        description: "Fabric-wide centralized policy — cflowd only"
+        cflowd:
+          - policy_definition: LO_CFlowd_Policy
+            site_lists:
+              - ALL_SD_WAN_SITES

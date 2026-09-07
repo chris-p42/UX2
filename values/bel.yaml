@@ -102,6 +102,20 @@ device_variables:
     vpn10_ospf_router_id: 10.0.0.100
     vpn10_ospf_area: '10'
 
+    # Port-channel / LACP (CLI add-on — fill in real values before deploying)
+    pc_id: PC_ID_PLACEHOLDER
+    pc_lacp_mode: active
+    pc_member1: PC_MEMBER1_PLACEHOLDER
+    pc_member2: PC_MEMBER2_PLACEHOLDER
+    # PnP
+    pnp_startup_vlan: PNP_VLAN_PLACEHOLDER
+    # PIM — cEdge-A wins DR election (higher priority)
+    pim_rp_address: PIM_RP_PLACEHOLDER
+    pim_dr_priority: 10
+    # Campus VLANs for PIM sub-interfaces on the port-channel
+    campus_vlan_corp: CAMPUS_VLAN_CORP
+    campus_vlan_infra: CAMPUS_VLAN_INFRA
+
   router2:
     hostname: SD-WAN02
     system_ip: 10.0.0.2
@@ -169,3 +183,17 @@ device_variables:
     loopback10_mask: 255.255.255.255
     vpn10_ospf_router_id: 10.0.0.200
     vpn10_ospf_area: '10'
+
+    # Port-channel / LACP (CLI add-on — fill in real values before deploying)
+    pc_id: PC_ID_PLACEHOLDER
+    pc_lacp_mode: active
+    pc_member1: PC_MEMBER1_PLACEHOLDER
+    pc_member2: PC_MEMBER2_PLACEHOLDER
+    # PnP
+    pnp_startup_vlan: PNP_VLAN_PLACEHOLDER
+    # PIM — cEdge-B is backup DR (lower priority)
+    pim_rp_address: PIM_RP_PLACEHOLDER
+    pim_dr_priority: 1
+    # Campus VLANs for PIM sub-interfaces on the port-channel
+    campus_vlan_corp: CAMPUS_VLAN_CORP
+    campus_vlan_infra: CAMPUS_VLAN_INFRA

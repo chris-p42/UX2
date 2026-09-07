@@ -70,3 +70,9 @@ variants:
     - branch/application-priority.yaml  # branch-only: LO_QOSMAP_V2 scheduler (7 queues)
     - branch/config-group.yaml
     - branch/aaa_tacacs.yaml
+
+  # Fabric-wide centralized policies — no shared_templates applied (those are
+  # per-device feature profiles; the fabric root has no devices).
+  # No site_id, no device_variables, no AAR file required.
+  fabric:
+    - fabric/cflowd.yaml              # cflowd definition + site lists + centralized policy

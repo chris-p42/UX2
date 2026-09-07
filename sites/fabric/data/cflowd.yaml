@@ -1,0 +1,35 @@
+sdwan:
+  policy_objects:
+    site_lists:
+    - name: ALL_SD_WAN_SITES
+      site_ids:
+      - 1
+      - 3
+      - 5
+  centralized_policies:
+    definitions:
+      data_policy:
+        cflowd:
+        - name: LO_CFlowd_Policy
+          description: "CFlowd \u2014 NetFlow/IPFIX export to collector"
+          active_flow_timeout: 60
+          inactive_flow_timeout: 30
+          sampling_interval: 1
+          flow_refresh: 60
+          protocol: ipv4
+          tos: true
+          remarked_dscp: true
+          collectors:
+          - vpn: 10
+            ip_address: CFLOWD_COLLECTOR_IP
+            port: 2055
+            transport: transport_udp
+            source_interface: Loopback10
+            export_spreading: enable
+    feature_policies:
+    - name: LO_Fabric_Policy
+      description: "Fabric-wide centralized policy \u2014 cflowd only"
+      cflowd:
+      - policy_definition: LO_CFlowd_Policy
+        site_lists:
+        - ALL_SD_WAN_SITES
