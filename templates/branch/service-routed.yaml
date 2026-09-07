@@ -1,0 +1,250 @@
+# templates/branch/service-routed.yaml
+#
+# Branch service profile for PURE-EDGE hardware (C8000V, ISR, or any IOS-XE
+# platform without a switchport ASIC).  On these devices there are no
+# switchport-capable ports, so the SDA campus handoff cannot use the
+# switchport-trunk + VLAN-SVI model used by branch-a / branch-b.  Instead,
+# each VLAN is terminated on a ROUTED SUBINTERFACE (e.g. GigabitEthernet5.3103
+# with implicit `encapsulation dot1Q 3103`), which acts as the Layer 3
+# endpoint for that VLAN directly — no switchport, no VLAN database.
+#
+# Structural differences from service.yaml (branch-a trunk model):
+#   - `svi_interfaces[]` removed entirely; all Layer 3 endpoints are in
+#     `ethernet_interfaces[]` instead (LOOPBACK10, LAN-CORP, LAN-INFRA,
+#     LAN-VLAN62, LAN-VLAN253).
+#   - `switchport_features[]` removed entirely — no trunk or access port.
+#   - Static subnet masks replaced with `*_variable` references on every
+#     interface and DHCP pool.  ALL IPv4 settings (address, mask) are device
+#     variables; no value is hardcoded in this template.
+#   - VLAN62 and VLAN253 now use `interface_name_variable` (svi_vlan62_ifname,
+#     svi_vlan253_ifname) instead of static "Vlan62" / "Vlan253", because the
+#     subinterface name encodes the parent port which is site-specific.
+#
+# Variables introduced (not present in service.yaml / service-b.yaml):
+#   svi_vlan62_ifname   — full subinterface name, e.g. GigabitEthernet5.62
+#   svi_vlan253_ifname  — full subinterface name, e.g. GigabitEthernet5.253
+#   loopback10_mask     — subnet mask for Loopback10 (was static /32)
+#   svi_corp_mask       — subnet mask for CORP subinterface (was static /30)
+#   svi_infra_mask      — subnet mask for INFRA subinterface (was static /30)
+#   vlan62_mask         — subnet mask for VLAN62 subinterface (was static /24)
+#   vlan253_mask        — subnet mask for VLAN253 subinterface (was static /29)
+#   vlan62_dhcp_mask    — DHCP pool subnet mask for VLAN62 (was static /24)
+#   vlan253_dhcp_mask   — DHCP pool subnet mask for VLAN253 (was static /29)
+#
+# Variables reused from service.yaml (values must be in subinterface format):
+#   svi_corp_ifname   — was "Vlan3103"; now e.g. "GigabitEthernet5.3103"
+#   svi_infra_ifname  — was "Vlan3101"; now e.g. "GigabitEthernet5.3101"
+#   (all other *_ip, *_desc, *_shutdown, VRRP, DHCP address/gw vars unchanged)
+#
+# Variants using this template:
+#   branch-a-routed  — MPLS + TLOC-EXT transport, routed subinterface LAN
+#   branch-b-routed  — Internet-only transport, routed subinterface LAN
+#
+# Module schema confirmed: sdwan_service_lan_vpn_interface_ethernet_feature
+# supports ipv4_vrrp_groups (sdwan_features_service.tf:953) and dhcp_server
+# association (sdwan_features_service.tf:1094) — identical semantics to SVIs.
+# ipv4_address_type: static is REQUIRED on every ethernet interface using
+# ipv4_address_variable (provider bug workaround, confirmed BXT 2026-07-24).
+#
+# SCHEMA-VALIDATED against nac-sdwan 1.4.0 (sdwan_features_service.tf).
+
+sdwan:
+  feature_profiles:
+    service_profiles:
+      - name: "SVC-__SITE__"
+        description: "Service profile - __SITE__"
+
+        # ── DHCP pools ───────────────────────────────────────────────────────
+        # Associated to LAN subinterfaces below by name.  Pool masks are
+        # device variables (no static masks in this template).
+        dhcp_servers:
+          # User VLAN 62 — same pool on both routers (VRRP pair)
+          - name: "DHCP-VLAN62"
+            pool_network_address_variable: vlan62_dhcp_pool
+            pool_subnet_mask_variable: vlan62_dhcp_mask
+            default_gateway_variable: vlan62_dhcp_gw
+            dns_servers: "__GLOBAL:dhcp.dns_servers__"
+          # PnP bootstrap VLAN 253 — per-router pool
+          - name: "DHCP-VLAN253"
+            pool_network_address_variable: vlan253_dhcp_pool
+            pool_subnet_mask_variable: vlan253_dhcp_mask
+            default_gateway_variable: vlan253_dhcp_gw
+            dns_servers: "__GLOBAL:dhcp.dns_servers__"
+
+        # ── BGP toward SDA border nodes ───────────────────────────────────
+        # One neighbor per VN (CORP + INFRA), shared remote-AS.
+        bgp_features:
+          - name: "BGP-VPN10"
+            as_number_variable: bgp_as_number
+            router_id_variable: bgp_router_id
+            propagate_community: true               # required for SDA community loop-guard (955999/DROP_FABRIC_ROUTES)
+            always_compare_med: true
+            ipv4_redistributes:
+              - protocol: omp
+              - protocol: connected
+            # network 0.0.0.0 0.0.0.0 — advertise the default toward the SDA
+            # border.  MUST live here, not as an ipv4_neighbors entry: the
+            # module maps ipv4_networks[] on network_address/subnet_mask
+            # (sdwan_features_service.tf:93), whereas an ipv4_neighbors entry
+            # carrying those keys renders a peer with neither address nor
+            # remote-as and vManage rejects the whole parcel with
+            # SCHVALID0001 "Required But Missing Attributes data.neighbor[N]".
+            # Only advertises if a default is actually in the VPN 10 RIB (it
+            # arrives via OMP); for `default-information originate` instead,
+            # the module key is ipv4_default_originate (:99).
+            ipv4_networks:
+              - network_address: '0.0.0.0'
+                subnet_mask: '0.0.0.0'
+            ipv4_neighbors:
+              - address_variable: bgp_neighbor_corp
+                remote_as_variable: bgp_neighbor_remote_as
+                send_community: true
+                send_extended_community: true            
+                address_families:
+                  - family_type: ipv4-unicast
+                    # QUOTED deliberately: bare `off` is YAML-1.1 boolean false
+                    # (both yamldecode and PyYAML), which reaches the provider
+                    # as policy_type = "false" and is rejected at plan time.
+                    maximum_prefixes_reach_policy: "off"
+                    route_policy_out: "OMP_TO_BGP_1000_MED"            
+                # fall_over_bfd: true → not in NaC data model; add via CLI add-on if needed
+              - address_variable: bgp_neighbor_infra
+                remote_as_variable: bgp_neighbor_remote_as
+                send_community: true
+                send_extended_community: true            
+                address_families:
+                  - family_type: ipv4-unicast
+                    # QUOTED deliberately: bare `off` is YAML-1.1 boolean false
+                    # (both yamldecode and PyYAML), which reaches the provider
+                    # as policy_type = "false" and is rejected at plan time.
+                    maximum_prefixes_reach_policy: "off"
+                    route_policy_out: "OMP_TO_BGP_1000_MED"
+
+
+        # ── Outbound BGP route-maps ──────────────────────────────────────────
+        # INDENTATION IS LOAD-BEARING: route_policies belongs to the SERVICE
+        # PROFILE (same level as bgp_features / lan_vpns), not to a bgp_features
+        # entry.  The module iterates `try(profile.route_policies, [])`
+        # (sdwan_features_service.tf:1995), so nesting this one level deeper
+        # makes every route-map vanish without a single error message: no
+        # sdwan_service_route_policy_feature is created, and the neighbor's
+        # `route_policy_out` then resolves through try(..., null) to null — the
+        # peer is configured with no outbound policy at all.
+        route_policies:
+          - name: "OMP_TO_BGP_1000_MED"
+            description: "Outbound to SDA border - set MED 1000"
+            default_action: reject           # = deny 65535
+            sequences:
+              - id: 1
+                name: "SET_MED"
+                base_action: accept          # = permit 1
+                protocol: ipv4
+                actions:
+                  metric: 1000
+          - name: "OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB"
+            description: "Outbound to SDA border - MED 1000 + prepend on Bloomberg ranges"
+            default_action: reject           # = deny 65535
+            sequences:
+              - id: 1
+                name: "PREPEND_BB"
+                base_action: accept
+                protocol: ipv4
+                match_entries:
+                  # __SITE__ suffix mandatory — see service.yaml
+                  ipv4_address_prefix_list: "LO_BB_PFX-__SITE__"
+                actions:
+                  metric: 1000
+                  prepend_as_paths: [655370, 655370, 655370, 655370, 655370]
+              - id: 11
+                name: "SET_MED"
+                base_action: accept
+                protocol: ipv4
+                actions:
+                  metric: 1000
+
+        lan_vpns:
+          # The ONE branch service VPN
+          - name: "VPN10"
+            vpn_id: 10
+            bgp: "BGP-VPN10"
+
+            # All Layer 3 LAN endpoints are routed ethernet interfaces.
+            # Subinterface names (GigabitEthernet5.3103, etc.) are supplied
+            # as device variables so they can differ across sites and routers.
+            ethernet_interfaces:
+
+              # ── Management / routing anchor ─────────────────────────────
+              # Loopback10 is the source address for TACACS, NTP, syslog
+              # (per globals.yaml) and the BGP router-id.
+              - name: "LOOPBACK10"
+                description: "Mgmt-plane source / routing anchor"
+                interface_name: "Loopback10"
+                shutdown_variable: loopback10_shutdown
+                # ipv4_address_type: static required by provider when
+                # ipv4_address_variable is set (confirmed BXT 2026-07-24).
+                ipv4_address_type: static
+                ipv4_address_variable: loopback10_ip
+                ipv4_subnet_mask_variable: loopback10_mask
+
+              # ── CORP routed subinterface ─────────────────────────────────
+              # /30 uplink into the SDA CORP Virtual Network.
+              # svi_corp_ifname device variable holds the full subinterface
+              # name: GigabitEthernet5.3103 on r1, GigabitEthernet5.3113 on r2
+              # (VLAN ID differs per router, same as the former Vlan3103/3113).
+              - name: "LAN-CORP"
+                description: "SDA CORP VN handoff"
+                interface_description_variable: svi_corp_desc
+                interface_name_variable: svi_corp_ifname
+                shutdown_variable: svi_corp_shutdown
+                ipv4_address_type: static
+                ipv4_address_variable: svi_corp_ip
+                ipv4_subnet_mask_variable: svi_corp_mask
+
+              # ── INFRA routed subinterface ────────────────────────────────
+              # /30 uplink into the SDA INFRA Virtual Network.
+              # svi_infra_ifname: GigabitEthernet5.3101 on r1,
+              #                   GigabitEthernet5.3111 on r2.
+              - name: "LAN-INFRA"
+                description: "SDA INFRA VN handoff"
+                interface_description_variable: svi_infra_desc
+                interface_name_variable: svi_infra_ifname
+                shutdown_variable: svi_infra_shutdown
+                ipv4_address_type: static
+                ipv4_address_variable: svi_infra_ip
+                ipv4_subnet_mask_variable: svi_infra_mask
+
+              # ── User VLAN 62 routed subinterface ────────────────────────
+              # User LAN segment — VRRP active/standby across the router pair
+              # (same virtual IP on both routers) + DHCP server.
+              # VLAN 62 is the same on both routers, so svi_vlan62_ifname
+              # typically resolves to the same value on both
+              # (e.g. GigabitEthernet5.62), but remains a variable to allow
+              # site-specific port naming.
+              - name: "LAN-VLAN62"
+                description: "User VLAN"
+                interface_description_variable: vlan62_desc
+                interface_name_variable: svi_vlan62_ifname
+                ipv4_address_type: static
+                ipv4_address_variable: vlan62_ip
+                ipv4_subnet_mask_variable: vlan62_mask
+                ipv4_vrrp_groups:
+                  - id: 62
+                    address_variable: vlan62_vrrp_ip
+                dhcp_server: "DHCP-VLAN62"
+
+              # ── PnP bootstrap VLAN 253 routed subinterface ───────────────
+              # Bootstrap VLAN for zero-touch provisioning of campus devices.
+              # Per-router DHCP pool, no VRRP.
+              - name: "LAN-VLAN253"
+                description: "PnP bootstrap VLAN"
+                interface_description_variable: vlan253_desc
+                interface_name_variable: svi_vlan253_ifname
+                ipv4_address_type: static
+                ipv4_address_variable: vlan253_ip
+                ipv4_subnet_mask_variable: vlan253_mask
+                dhcp_server: "DHCP-VLAN253"
+
+        # No switchport_features block — pure-edge routers have no switchport
+        # ASIC.  The physical parent port (e.g. GigabitEthernet5) is left
+        # unconfigured in the service profile; IOS-XE treats it as a routed
+        # interface automatically when subinterfaces are attached.

@@ -1,0 +1,35 @@
+# templates/_shared/policy.yaml
+#
+# WHAT THIS FILE IS FOR — the policy GROUP, one per site.
+#
+# A policy group is the UX2 object a router attaches to alongside its config
+# group.  generate.py emits, for every router in values/<site>.yaml:
+#     policy_group: "PG-<SITE>"       (see build_site_values_yaml)
+# and THIS file is what declares that PG-<SITE> exists.  Without it the attach
+# would reference a policy group the root never creates.
+#
+# The group itself holds almost nothing: per sdwan_policy_groups.tf it can
+# only reference an `application_priority` profile and an `ngfw_security`
+# profile, both by name.  So its whole job is to bind the site's routers to
+# APP-PRIORITY-<SITE> (QoS scheduler + traffic policies), which is declared in
+# templates/_shared/application-priority-common.yaml.
+#
+# Chain:  router --policy_group--> PG-<SITE> --application_priority-->
+#         APP-PRIORITY-<SITE> --references--> objects in PO-<SITE>
+#
+# REMOVED 2026-09-02: this file used to also declare a
+# `feature_profiles.policy_object_profile` holding an UNSUFFIXED `LO_BB_PFX`.
+# That was a leftover from before the 2026-08-19 PPARC0012 finding (parcel
+# names are unique tenant-wide, so every object carries a -<SITE> suffix).
+# Because _shared/ is rendered into EVERY site, the unsuffixed object was
+# being recreated in bel/, bxt/ and cml/ side by side with the correctly
+# suffixed LO_BB_PFX-<SITE> from templates/branch/policy-objects.yaml — the
+# second site to be applied would have failed with the exact same PPARC0012
+# error again.  Policy objects now live only in templates/_shared/
+# policy-objects-common.yaml (fabric-wide ones) and the variant files.
+
+sdwan:
+  policy_groups:
+    - name: "PG-__SITE__"
+      description: "Policy group - __SITE__"
+      application_priority: "APP-PRIORITY-__SITE__"

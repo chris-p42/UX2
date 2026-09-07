@@ -1,0 +1,41 @@
+# templates/branch/config-group.yaml
+#
+# Shared by both branch variants.  Composes the site's feature profiles
+# into one Config Group.
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0
+# (sdwan_configuration_groups.tf):
+#   - Profiles are referenced by TYPE-SPECIFIC named keys
+#     (system_profile / transport_profile / service_profile / cli_profile),
+#     NOT a generic `profiles:` list.
+#   - The policy group is NOT part of the config group: it is attached
+#     per-router in sdwan.sites[].routers[].policy_group — see
+#     generate.py build_site_values_yaml / site-values.yaml.
+#   - Devices attach to this group per-router via
+#     routers[].configuration_group referencing the name below.
+#
+# cli_profile added 2026-08-07 (see templates/branch/cli.yaml — BGP
+# fall-over bfd supplement, not expressible via the BGP feature parcel).
+#
+# policy_object_profile added 2026-08-18 (see templates/branch/policy-objects.yaml).
+# Since 2026-09-01 EVERY variant carries a policy-objects.yaml (dc included),
+# so every config-group template attaches policy_object_profile.
+# sdwan_configuration_groups.tf:10 resolves it as
+#   sdwan_policy_object_feature_profile.policy_object_feature_profile[0].id
+# and that resource has count = 0 in any root whose data/ declares no
+# policy_object_profile — so never drop policy-objects.yaml from a variant
+# without removing this key from its config-group template too.
+#
+# NOTE it is NOT yet confirmed that this attachment is even required for the
+# device to render `ip prefix-list` — the objects may be resolved by parcel id
+# alone.  Test on BXT and drop the key if it turns out to be unnecessary.
+
+sdwan:
+  configuration_groups:
+    - name: "CG-__SITE__"
+      description: "Config group - __SITE__"
+      system_profile: "SYS-__SITE__"
+      transport_profile: "TRANS-__SITE__"
+      service_profile: "SVC-__SITE__"
+      cli_profile: "CLI-__SITE__"
+      policy_object_profile: "PO-__SITE__"

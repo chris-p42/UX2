@@ -1,0 +1,127 @@
+# templates/dc/service.yaml
+#
+# DC hub service side.  Modelled from the UX1 export of
+# LO_DC_DEVICE_TEMPLATE_V1.2 (site BEL).
+#
+# CONFIRMED MODEL (user, 2026-07): CORP and INFRA are FUSED into the single
+# service VPN 10 on the SD-WAN fabric; they are separate Virtual Networks
+# only on the SDA (campus) side.  Do not reintroduce a separate INFRA
+# VRF/VPN here.
+#
+# No native LAN interface parcel beyond Loopback10: the campus LAG
+# (Port-channel1) is pushed via the CLI add-on profile (templates/dc/cli.yaml)
+# — this is the "DC service-profile-without-interface" pattern.
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0 — same conventions as
+# templates/branch/service.yaml (lan_vpns list, named ospf feature
+# referenced from the VPN, `<field>_variable:` for per-device values).
+#
+# 2026-07-29 — brought in line with the fixes proven on BXT (live-validated
+# 2026-07-29):
+#   - Loopback10 sets `ipv4_address_type: static` (required by the provider
+#     when ipv4_address_variable is used).
+#
+# DESIGN CORRECTION (user, 2026-08-07): the DC hub does NOT peer BGP on the
+# LAN/campus side — OSPF only, toward the DC core over the campus LAG. A
+# bgp_features block + `bgp:` VPN reference (mirroring the branch VPN10
+# CORP+INFRA BGP model) was added briefly on 2026-08-07 and was wrong for
+# BEL's actual design — removed same day. Branches and the DC hub
+# deliberately use different LAN routing protocols; do not reintroduce BGP
+# here without an explicit design decision.
+
+sdwan:
+  feature_profiles:
+    service_profiles:
+      - name: "SVC-__SITE__"
+        description: "Service profile - __SITE__ (DC hub)"
+
+        # OSPF toward the DC core over the campus LAG.
+        # Timers / reference bandwidth are FABRIC-GLOBAL (identical on every
+        # site, requirement 2026-07-29) — sourced from globals.yaml `ospf:`
+        # via __GLOBAL: tokens; the service OSPF feature consumes the same
+        # keys as the transport one (verified against nac-sdwan 1.4.0).
+        # No per-interface entries here: the LAG (Port-channel1) is pushed
+        # via the CLI add-on, so its OSPF interface settings live there too.
+        ospf_features:
+          - name: "OSPF-VPN10"
+            router_id_variable: vpn10_ospf_router_id
+            reference_bandwidth: "__GLOBAL:ospf.reference_bandwidth__"
+            spf_calculation_delay: "__GLOBAL:ospf.spf_calculation_delay__"
+            spf_initial_hold_time: "__GLOBAL:ospf.spf_initial_hold_time__"
+            spf_maximum_hold_time: "__GLOBAL:ospf.spf_maximum_hold_time__"
+            areas:
+              - number_variable: vpn10_ospf_area
+
+        lan_vpns:
+          # The ONE DC service VPN
+          - name: "VPN10"
+            vpn_id: 10
+            ospf: "OSPF-VPN10"
+
+            # ── Default route origination toward the spokes ──────────────────
+            # THE HUB IS THE ONLY SOURCE OF THE VPN 10 DEFAULT IN THE OVERLAY.
+            # The DC core injects 0.0.0.0/0 into BEL over the campus LAG in
+            # OSPF; this entry is what pushes it across OMP so every branch
+            # receives it.  Each branch then re-advertises it to its SDA border
+            # with MED 1000 via `ipv4_networks: 0.0.0.0/0` +
+            # `route_policy_out: OMP_TO_BGP_1000_MED` — see the BGP section of
+            # templates/branch/service*.yaml.  Chain end to end:
+            #
+            #   DC core --OSPF--> BEL --OMP--> spoke --BGP MED 1000--> SDA border
+            #
+            # WHY THIS ENTRY IS REQUIRED even though the shared OMP parcel
+            # already sets `advertise_ipv4_ospf: true` (_shared/system.yaml):
+            # that flag redistributes the OSPF RIB into OMP, but OMP does not
+            # carry 0.0.0.0/0 on redistribution alone — the default has to be
+            # named explicitly here.  Without this block the branches' BGP
+            # `network 0.0.0.0 0.0.0.0` matches nothing (the default is simply
+            # absent from their VPN 10 RIB) and the SDA border learns no
+            # default at all, with no error anywhere to explain why.
+            #
+            # `networks:` restricts the advertisement to the default ONLY —
+            # the rest of the OSPF RIB keeps flowing through the parcel-level
+            # advertise_ipv4_ospf flag, unchanged.
+            #
+            # Schema (sdwan_features_service.tf:396, advertise_omp_ipv4s):
+            #   ipv4_omp_advertise_routes[] {protocol, route_policy,
+            #                                networks[] | aggregates[]}
+            #   networks[] {network_address, subnet_mask, region}
+            # PROTOCOL — `network`, NOT `ospf`.  Corrected 2026-09-04 after a
+            # live apply on sites/bel was rejected with
+            #   HTTP 400 SCHVALID0001 {"Validation Errors":{"Invalid Format
+            #   Attributes":["data.ompAdvertiseIp4[0].ompProtocol"]}}
+            # `ospf` IS a valid provider value (the provider documents bgp,
+            # ospf, ospfv3, connected, static, network, aggregate, eigrp, lisp,
+            # isis), so the provider planned it happily — vManage refused the
+            # COMBINATION.  The parcel has two shapes: redistribute a whole
+            # source RIB (`ompProtocol` = bgp/ospf/connected/static..., no
+            # prefix list), or advertise NAMED prefixes (`ompProtocol` =
+            # network/aggregate, with a prefix list).  We send a prefix list, so
+            # the protocol must be `network`; `ospf` + prefixes matches neither
+            # shape and vManage points at the discriminator.
+            # LESSON: provider-valid is not vManage-valid.  The provider's enum
+            # is the union of what the field can hold across shapes; vManage
+            # enforces the shape.
+            #
+            # This makes the advertisement independent of where the default came
+            # from — it advertises 0.0.0.0/0 whenever it is in the VPN 10 RIB,
+            # whether OSPF, a static route or anything else put it there.  That
+            # still satisfies the 2026-09-02 decision (the default reaches BEL
+            # from the DC core over OSPF) and survives BEL gaining its own
+            # static default later, which the `ospf` form would not have.
+            ipv4_omp_advertise_routes:
+              - protocol: network
+                networks:
+                  - network_address: "0.0.0.0"
+                    subnet_mask: "0.0.0.0"
+
+            ethernet_interfaces:
+              # Loopback10: mgmt-plane source (NTP/syslog per globals.yaml)
+              # and routing anchor — same role as on branches
+              - name: "LOOPBACK10"
+                description: "Mgmt-plane source / routing anchor"
+                interface_name: "Loopback10"
+                # Required by provider when ipv4_address_variable is set.
+                ipv4_address_type: static
+                ipv4_address_variable: loopback10_ip
+                ipv4_subnet_mask_variable: loopback10_mask

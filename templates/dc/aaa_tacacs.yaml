@@ -1,0 +1,47 @@
+# templates/dc/aaa_tacacs.yaml
+#
+# AAA parcel for DC hub sites — merged onto the SYS-BEL profile from
+# _shared/system.yaml by the module's YAML merge (list items merge by
+# `name`; verified against netascode/utils 1.0.2).
+#
+# Source: UX1 feature template LO_DC_AAA_ISE
+#   (templateId 0dc379ac-3c69-48f5-b3e2-b7cf98a48fb9)
+#   server-auth-order: "tacacs-512,local"
+#
+# SCHEMA-VALIDATED 2026-07-24 — same notes as templates/branch/aaa_tacacs.yaml.
+# The module auto-derives the group name "tacacs-512" from vpn 512.
+#
+# Key differences from branch:
+#   VPN         512 (out-of-band management) vs 10 (service VPN)
+#   Source-if   GigabitEthernet0 (OOB port on C8500-12X) vs Loopback10
+# The DC reaches TACACS over the physically separate OOB management network,
+# so authentication works even when the overlay is down.
+#
+# TODO: server addresses/key are still placeholders.  The branch template
+# now carries real server IPs (10.253.241.173/.174 via VPN 10) — confirm
+# whether the DC reaches the SAME servers over the OOB network before
+# copying them here; the placeholder scan blocks a deploy until resolved.
+
+sdwan:
+  feature_profiles:
+    system_profiles:
+      - name: "SYS-__SITE__"
+        aaa:
+          # TACACS first, local fallback — mirrors UX1 "tacacs-512,local"
+          auth_order:
+            - "tacacs-512"
+            - "local"
+
+          tacacs_groups:
+            # Module derives group name "tacacs-512" from vpn below.
+            - vpn: 512
+              source_interface: "GigabitEthernet0"
+              servers:
+                - address: "10.253.241.173"   # primary — fill in real IP/FQDN
+                  key: "TACACS_ENCRYPTED_KEY"  # AES type-6; fill in real value
+                  port: 49
+                  timeout: 5                   # seconds before next server
+                - address: "10.253.241.174"   # secondary — fill in real IP/FQDN
+                  key: "TACACS_ENCRYPTED_KEY"
+                  port: 49
+                  timeout: 5

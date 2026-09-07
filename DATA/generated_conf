@@ -1,0 +1,590 @@
+bxtdw01#sh run
+Building configuration...
+ 
+Current configuration : 16158 bytes
+!
+! Last configuration change at 10:23:09 CET Fri Aug 28 2026 by vmanage-admin
+!
+version 17.15
+service tcp-keepalives-in
+service tcp-keepalives-out
+service timestamps debug datetime msec
+service timestamps log datetime msec
+service password-encryption
+platform qfp utilization monitor load 80
+platform console virtual
+!
+hostname bxtdw01
+!
+boot-start-marker
+boot-end-marker
+!
+!
+vrf definition 10
+rd 1:10
+!
+address-family ipv4
+exit-address-family
+!
+address-family ipv6
+exit-address-family
+!
+vrf definition 65528
+description SIG VRF
+!
+address-family ipv4
+exit-address-family
+!
+vrf definition 65529
+description Speedtest VRF
+!
+address-family ipv4
+exit-address-family
+!
+no logging queue-limit
+logging buffered 512000
+logging persistent size 104857600 filesize 10485760
+aaa new-model
+!
+!        
+aaa group server tacacs+ tacacs-10
+server-private 10.253.241.173 key 6 YELVFO]SAWHXbPbU][aXUXNQEIPUBgThUXHEchUeAiM_]JaXWcY
+server-private 10.253.241.174 key 6 Zd^YFcEXLXU_TgiJUMWUbGWa^eMgXdFbDaMFBaHE]dFISUhQOG]
+ip vrf forwarding 10
+ip tacacs source-interface Loopback10
+!
+aaa authentication login default group tacacs-10 local
+aaa authorization exec default group tacacs-10 local
+!
+!
+aaa server radius dynamic-author
+!
+aaa session-id common
+no process cpu extended history
+clock timezone CET 1 0
+!
+!
+!
+!
+!
+ip arp proxy disable
+!
+!
+!
+!
+!
+!
+!
+ip name-server 172.16.1.254 172.16.2.254
+no ip domain lookup
+ip bootp server
+ip dhcp use vrf remote
+ip dhcp use hardware-address client-id
+!
+ip dhcp pool vrf-10-GigabitEthernet5.253
+vrf 10
+network 10.3.253.0 255.255.255.248
+default-router 10.3.253.1
+!
+ip dhcp pool vrf-10-GigabitEthernet5.62
+vrf 10
+network 10.3.62.0 255.255.255.0
+default-router 10.3.62.254
+!        
+!
+!
+login on-success log
+!
+!
+subscriber templating
+ipv6 unicast-routing
+ipv6 rip vrf-mode enable
+fhrp version vrrp v3
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+password encryption aes
+!
+!
+crypto pki trustpoint TP-self-signed-1985584740
+enrollment selfsigned
+revocation-check crl
+hash sha512
+!
+crypto pki trustpoint SLA-TrustPoint
+enrollment pkcs12
+revocation-check crl
+hash sha512
+!
+!
+crypto pki certificate chain TP-self-signed-1985584740
+crypto pki certificate chain SLA-TrustPoint
+!
+!
+!
+!
+!
+!
+!
+!        
+!
+license udi pid C8000V sn C8K-27148AFE-7160-69D3-ACC5-F77560530D63
+memory free low-watermark processor 227593
+diagnostic bootup level minimal
+!
+!
+spanning-tree extend system-id
+!
+!
+!
+username dnac privilege 15 secret 9 $9$8qFvUxJEjp40Rt$fWVrIUZVc0pJyVQ2GrWRJ1F25GqC2W67MqOHCoXPiJk
+username rescuser privilege 15 secret 9 $9$FVJg26u0mu7KHd$YbtOqTIYJX8f/gFGnYOCWDlB0IzJ3zQhHA5mpklzB0E
+!
+redundancy
+!
+!
+!
+!
+!
+no crypto ikev2 diagnose error
+!        
+!
+cdp run
+!
+lldp run
+!
+policy-map shape_GigabitEthernet4.992
+class class-default
+  shape average 100000000  
+policy-map shape_GigabitEthernet3
+class class-default
+  shape average 100000000  
+policy-map shape_GigabitEthernet2
+class class-default
+  shape average 100000000  
+policy-map shape_GigabitEthernet1
+class class-default
+  shape average 100000000  
+!
+!
+!
+!
+!
+!        
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+!
+interface Loopback10
+vrf forwarding 10
+ip address 10.3.3.1 255.255.255.255
+no ip redirects
+ip mtu 1500
+!
+interface Loopback65528
+vrf forwarding 65528
+ip address 192.168.1.1 255.255.255.255
+!
+interface Loopback65529
+vrf forwarding 65529
+ip address 11.1.0.3 255.255.255.255
+!
+interface Tunnel1
+ip unnumbered GigabitEthernet1
+no ip redirects
+ipv6 unnumbered GigabitEthernet1
+no ipv6 redirects
+tunnel source GigabitEthernet1
+tunnel mode sdwan
+!
+interface Tunnel2
+ip unnumbered GigabitEthernet2
+no ip redirects
+ipv6 unnumbered GigabitEthernet2
+no ipv6 redirects
+tunnel source GigabitEthernet2
+tunnel mode sdwan
+!
+interface Tunnel3
+ip unnumbered GigabitEthernet3
+no ip redirects
+ipv6 unnumbered GigabitEthernet3
+no ipv6 redirects
+tunnel source GigabitEthernet3
+tunnel mode sdwan
+!
+interface Tunnel992004
+ip unnumbered GigabitEthernet4.992
+no ip redirects
+ipv6 unnumbered GigabitEthernet4.992
+no ipv6 redirects
+tunnel source GigabitEthernet4.992
+tunnel mode sdwan
+!
+interface GigabitEthernet1
+description BXT INTERNET 1
+ip address 172.16.1.30 255.255.255.0
+no ip redirects
+ip nat outside
+load-interval 30
+negotiation auto
+arp timeout 1200
+service-policy output shape_GigabitEthernet1
+!
+interface GigabitEthernet2
+description BXT MPLS 1
+ip address 172.16.2.30 255.255.255.0
+no ip redirects
+ip nat outside
+ip ospf network broadcast
+ip ospf dead-interval 20
+ip ospf hello-interval 5
+ip ospf 65535 area 172
+load-interval 30
+negotiation auto
+arp timeout 1200
+service-policy output shape_GigabitEthernet2
+!
+interface GigabitEthernet3
+description BXT INTERNET 2
+ip address 172.16.3.30 255.255.255.0
+no ip redirects
+ip nat outside
+load-interval 30
+negotiation auto
+arp timeout 1200
+service-policy output shape_GigabitEthernet3
+!
+interface GigabitEthernet4
+description *** Private PARENT TLOC-EXT ***
+no ip address
+no ip redirects
+load-interval 30
+negotiation auto
+arp timeout 1200
+!
+interface GigabitEthernet4.991
+description Private 1 TLOC-EXT Relay FOR SD-WAN02
+encapsulation dot1Q 991
+ip address 172.25.4.1 255.255.255.252
+no ip redirects
+ip ospf network broadcast
+ip ospf dead-interval 20
+ip ospf hello-interval 5
+ip ospf 65535 area 172
+arp timeout 1200
+!
+interface GigabitEthernet4.992
+description Private 2 TLOC-EXT SD-WAN01 VIA SWD02
+encapsulation dot1Q 992
+ip address 172.25.5.1 255.255.255.252
+no ip redirects
+arp timeout 1200
+service-policy output shape_GigabitEthernet4.992
+!
+interface GigabitEthernet5
+no ip address
+negotiation auto
+!
+interface GigabitEthernet5.62
+description INT-SDA-DHCP
+encapsulation dot1Q 62
+vrf forwarding 10
+ip address 10.3.62.252 255.255.255.0
+no ip redirects
+shutdown
+arp timeout 1200
+vrrp 62 address-family ipv4
+  vrrpv2
+  address 10.3.62.254 primary
+  exit-vrrp
+!        
+interface GigabitEthernet5.253
+description BXT PnP VLAN 253
+encapsulation dot1Q 253
+vrf forwarding 10
+ip address 10.3.253.1 255.255.255.248
+no ip redirects
+shutdown
+arp timeout 1200
+!
+interface GigabitEthernet5.3101
+description INT-VLAN-BGP-INFRA
+encapsulation dot1Q 3101
+vrf forwarding 10
+ip address 10.3.60.1 255.255.255.252
+no ip redirects
+arp timeout 1200
+!
+interface GigabitEthernet5.3103
+description INT-VLAN-BGP-CORP
+encapsulation dot1Q 3103
+vrf forwarding 10
+ip address 10.3.60.5 255.255.255.252
+no ip redirects
+arp timeout 1200
+!
+interface GigabitEthernet6
+no ip address
+negotiation auto
+!
+interface GigabitEthernet7
+no ip address
+negotiation auto
+!
+interface GigabitEthernet8
+no ip address
+negotiation auto
+!
+router omp
+!
+router ospf 65535
+router-id 10.3.3.1
+timers throttle spf 200 1000 10000
+!
+router bgp 10.10
+bgp always-compare-med
+bgp asnotation dot
+bgp log-neighbor-changes
+!
+address-family ipv4 vrf 10
+  bgp router-id 10.3.3.1
+  network 0.0.0.0
+  redistribute connected
+  redistribute omp
+  propagate-community
+  neighbor 10.3.60.2 remote-as 1.1
+  neighbor 10.3.60.2 fall-over bfd
+  neighbor 10.3.60.2 activate
+  neighbor 10.3.60.2 send-community both
+  neighbor 10.3.60.2 route-map OMP_TO_BGP_1000_MED out
+  neighbor 10.3.60.6 remote-as 1.1
+  neighbor 10.3.60.6 fall-over bfd
+  neighbor 10.3.60.6 activate
+  neighbor 10.3.60.6 send-community both
+  neighbor 10.3.60.6 route-map OMP_TO_BGP_1000_MED out
+  distance bgp 20 200 20
+exit-address-family
+!
+ip forward-protocol nd
+no ip forward-protocol udp
+!
+no ip http server
+no ip http secure-server
+no ip ftp passive
+ip route 0.0.0.0 0.0.0.0 172.16.1.254
+ip route 0.0.0.0 0.0.0.0 172.16.2.254
+ip route 0.0.0.0 0.0.0.0 172.16.3.254
+ip route 0.0.0.0 0.0.0.0 172.25.5.2
+ip nat settings central-policy
+ip nat settings gatekeeper-size 1024
+ip nat route vrf 65528 0.0.0.0 0.0.0.0 global
+ip nat translation tcp-timeout 3600
+ip nat translation udp-timeout 60
+no ip nat service all-algs
+ip nat inside source list nat-dia-vpn-hop-access-list interface GigabitEthernet1 overload
+ip nat inside source list nat-dia-vpn-hop-access-list interface GigabitEthernet2 overload
+ip nat inside source list nat-dia-vpn-hop-access-list interface GigabitEthernet3 overload
+no ip ssh bulk-mode
+ip scp server enable
+!        
+logging trap syslog-format rfc5424
+logging source-interface Loopback10 vrf 10
+logging host 10.253.90.200 vrf 10
+no ipv6 mld ssm-map query dns
+route-map OMP_TO_BGP_1000_MED permit 1
+ set metric 1000
+!
+route-map OMP_TO_BGP_1000_MED deny 65535
+!
+snmp-server engineID local 80000009766D616E0A000003
+snmp-server group V3Group v3 priv read snmpv3_orion
+snmp-server view snmpv3_orion 1.3.6.1 included
+snmp-server contact telecom.all@lombardodier.com
+snmp-server enable traps snmp authentication linkdown linkup coldstart warmstart
+snmp-server enable traps flowmon
+snmp-server enable traps pfr
+snmp-server enable traps ds1
+snmp-server enable traps sdwan security policy system omp bfd
+snmp-server enable traps entity-perf throughput-notif
+snmp-server enable traps call-home message-send-fail server-fail
+snmp-server enable traps tty
+snmp-server enable traps ospf state-change
+snmp-server enable traps ospf errors
+snmp-server enable traps ospf retransmit
+snmp-server enable traps ospf lsa
+snmp-server enable traps ospf cisco-specific state-change nssa-trans-change
+snmp-server enable traps ospf cisco-specific state-change shamlink interface
+snmp-server enable traps ospf cisco-specific state-change shamlink neighbor
+snmp-server enable traps ospf cisco-specific errors
+snmp-server enable traps ospf cisco-specific retransmit
+snmp-server enable traps ospf cisco-specific lsa
+snmp-server enable traps eigrp
+snmp-server enable traps casa
+snmp-server enable traps xgcp
+snmp-server enable traps cef resource-failure peer-state-change peer-fib-state-change inconsistency
+snmp-server enable traps smart-license
+snmp-server enable traps diameter
+snmp-server enable traps entity-qfp mem-res-thresh throughput-notif
+snmp-server enable traps entity-state
+snmp-server enable traps ethernet cfm cc mep-up mep-down cross-connect loop config
+snmp-server enable traps ethernet cfm crosscheck mep-missing mep-unknown service-up
+snmp-server enable traps ether-oam
+snmp-server enable traps ethernet evc status create delete
+snmp-server enable traps aaa_server
+snmp-server enable traps config-copy
+snmp-server enable traps config
+snmp-server enable traps config-ctid
+snmp-server enable traps memory bufferpeak
+snmp-server enable traps fru-ctrl
+snmp-server enable traps entity-sensor
+snmp-server enable traps resource-policy
+snmp-server enable traps flash insertion removal lowspace
+snmp-server enable traps hsrp
+snmp-server enable traps entity
+snmp-server enable traps ip local pool
+snmp-server enable traps cpu threshold
+snmp-server enable traps auth-framework sec-violation
+snmp-server enable traps atm subif
+snmp-server enable traps frame-relay
+snmp-server enable traps frame-relay subif
+snmp-server enable traps bgp state-changes all backward-trans limited updown-limited
+snmp-server enable traps bgp threshold prefix
+snmp-server enable traps bgp cbgp2 state-changes all backward-trans limited updown-limited
+snmp-server enable traps bgp cbgp2 threshold prefix
+snmp-server enable traps pim neighbor-change rp-mapping-change invalid-pim-message
+snmp-server enable traps ipmulticast
+snmp-server enable traps msdp
+snmp-server enable traps mvpn
+snmp-server enable traps rsvp
+snmp-server enable traps isis
+snmp-server enable traps dhcp
+snmp-server enable traps nhrp nhs
+snmp-server enable traps nhrp nhc
+snmp-server enable traps nhrp nhp
+snmp-server enable traps nhrp quota-exceeded
+snmp-server enable traps ipsla
+snmp-server enable traps bfd
+snmp-server enable traps cnpd
+snmp-server enable traps event-manager
+snmp-server enable traps dlsw
+snmp-server enable traps ospfv3 state-change
+snmp-server enable traps ospfv3 errors
+snmp-server enable traps pppoe
+snmp-server enable traps l2tun session
+snmp-server enable traps l2tun pseudowire status
+snmp-server enable traps l2tun tunnel
+snmp-server enable traps pki
+snmp-server enable traps pimstdmib neighbor-loss invalid-register invalid-join-prune rp-mapping-change interface-election
+snmp-server enable traps vrrpv3
+snmp-server enable traps adslline
+snmp-server enable traps entity-diag boot-up-fail hm-test-recover hm-thresh-reached scheduled-test-fail
+snmp-server enable traps vdsl2line
+snmp-server enable traps vtp
+snmp-server enable traps vlancreate
+snmp-server enable traps vlandelete
+snmp-server enable traps port-security
+snmp-server enable traps isdn call-information
+snmp-server enable traps isdn layer2
+snmp-server enable traps isdn chan-not-avail
+snmp-server enable traps isdn ietf
+snmp-server enable traps c3g
+snmp-server enable traps LTE
+snmp-server enable traps lisp
+snmp-server enable traps firewall serverstatus
+snmp-server enable traps ike policy add
+snmp-server enable traps otn
+snmp-server enable traps pw vc
+snmp-server enable traps frame-relay multilink bundle-mismatch
+snmp-server enable traps dial
+snmp-server enable traps dsp card-status
+snmp-server enable traps dsp oper-state
+snmp-server enable traps dsp video-usage
+snmp-server enable traps dsp video-out-of-resource
+snmp-server enable traps syslog
+snmp-server enable traps sbc adj-status
+snmp-server enable traps sbc blacklist
+snmp-server enable traps sbc congestion-alarm
+snmp-server enable traps sbc h248-ctrlr-status
+snmp-server enable traps sbc media-source
+snmp-server enable traps sbc radius-conn-status
+snmp-server enable traps sbc sla-violation
+snmp-server enable traps sbc sla-violation-rev1
+snmp-server enable traps sbc svc-state
+snmp-server enable traps sbc qos-statistics
+snmp-server enable traps bulkstat collection transfer
+snmp-server enable traps ethernet cfm alarm
+snmp-server enable traps alarms informational
+snmp-server enable traps transceiver all
+snmp-server enable traps rf
+snmp-server enable traps vrfmib vrf-up vrf-down vnet-trunk-up vnet-trunk-down
+snmp-server enable traps ccme
+snmp-server enable traps srst
+snmp-server enable traps mpls vpn
+snmp-server enable traps mpls rfc vpn
+snmp-server enable traps voice
+!
+!
+!
+!
+!
+control-plane
+!
+!
+mgcp behavior rsip-range tgcp-only
+mgcp behavior comedia-role none
+mgcp behavior comedia-check-media-src disable
+mgcp behavior comedia-sdp-force disable
+!
+mgcp profile default
+!
+!
+!
+!
+!
+banner motd ^CThis system is to be logged in to or used only by specifically authorized personnel. Any unauthorized use of the system is unlawfull, and may be subject to civil and/or criminal penalties. Any use of the system may be logged or monitored with
+ut further notice, and the resulting logs may be used as evidence in court.^C
+!
+line con 0
+stopbits 1
+line aux 0
+line vty 0 4
+transport input ssh
+line vty 5 80
+transport input ssh
+!
+nat64 translation timeout udp 300
+nat64 translation timeout tcp 3600
+ntp source Loopback10
+ntp server vrf 10 10.253.65.1
+ntp server vrf 10 10.253.65.10
+!
+!
+!
+!
+!
+!
+!
+netconf-yang
+netconf-yang feature candidate-datastore
+end

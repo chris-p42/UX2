@@ -1,6 +1,0 @@
-servers:
-  - address: 10.1.2.1
-    vpn: 0
-  - address: 10.1.2.2
-    vpn: 0
-timezone: UTC

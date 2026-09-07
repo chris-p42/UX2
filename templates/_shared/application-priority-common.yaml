@@ -1,0 +1,40 @@
+# templates/_shared/application-priority-common.yaml
+#
+# The Application Priority profile SHELL — its name and description, nothing
+# else.  The profile is assembled from three sources that MERGE into one
+# APP-PRIORITY-__SITE__ (see the SPLIT ACROSS FILES note in
+# templates/_shared/policy-objects-common.yaml):
+#
+#     _shared/application-priority-common.yaml   profile identity      (here)
+#     dc|branch/application-priority.yaml        QOS-<SITE> scheduler  (per variant)
+#     values/aar/<site>.yaml                     TRAFFIC-<SITE> policy (per SITE)
+#
+# WHY THERE IS NO TRAFFIC POLICY LEFT IN THIS FILE — 2026-09-04.
+#
+# It used to hold QOSCLASS-__SITE__ (the migrated UX1 data policy) while the AAR
+# lived per site.  A live apply from sites/bxt rejected that split:
+#     PPARC0008 "Multiple traffic policies cannot be added for same vpn and
+#     same direction:{ 10,all } for traffic policy QOSCLASS-BXT and AAR-BXT"
+# vManage accepts several traffic policies in one profile, but not two that
+# overlap on (VPN, direction) — and `all` subsumes `service`.  UX1's two
+# independent policies (data policy direction `all` + LO_AAR direction
+# `service`) therefore had to be merged into ONE parcel.
+#
+# That merged parcel carries `preferred_colors`, which is per-site, so the whole
+# thing is per-site now: values/aar/<site>.yaml.  Nothing generic is left to
+# share here beyond the profile identity.
+#
+# This also answers the TODO this file used to carry ("confirm that vManage
+# accepts TWO traffic policy parcels inside one Application Priority profile"):
+# it does not, when they overlap on VPN and direction.
+#
+# The directory is still named values/aar/ although it now holds the whole
+# traffic policy, not just app-aware routing.  Renaming it touches generate.py,
+# AGENTS.md and README.md; left as a deliberate follow-up rather than churn in
+# the middle of an apply.
+
+sdwan:
+  feature_profiles:
+    application_priority_profiles:
+      - name: "APP-PRIORITY-__SITE__"
+        description: "Application priority profile - __SITE__"

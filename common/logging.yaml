@@ -1,7 +1,0 @@
-servers:
-  - address: 10.1.4.1
-    vpn: 0
-    priority: informational
-  - address: 10.1.4.2
-    vpn: 0
-    priority: informational

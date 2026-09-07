@@ -1,364 +1,108 @@
-﻿# SD-WAN Network-as-Code — Terraform (UX2)
+# nac4 — Cisco Catalyst SD-WAN Network-as-Code
 
-Infrastructure-as-code for a Cisco Catalyst SD-WAN fabric using the **UX2 paradigm** (config groups and parcels). Target platform: vManage 20.13 / IOS-XE 17.13+. Provider: `CiscoDevNet/sdwan`.
+Manages a Cisco Catalyst SD-WAN fabric (vManage 20.13 / IOS-XE 17.13+) using
+the `netascode/nac-sdwan/sdwan` Terraform module (v1.4.0), UX2 paradigm only.
 
 ---
 
-## Repository layout
+## Sites
+
+| Site | Role | Hardware | Variant | lab site_id |
+|------|------|----------|---------|-------------|
+| **BEL** | DC hub | C8500-12X pair | `dc` | 1 |
+| **BXT** | Branch test-lab | C8200L pair | `branch-a-routed` | 3 |
+| **CML** | Branch (internet-only) | VMs | `branch-b-routed` | 5 |
+
+All three exist in vManage (applied 2026-09-04). No configuration has been
+pushed to any device yet — `configuration_group_deploy` and
+`policy_group_deploy` are `false` on all routers.
+
+**BEL** is placeholder-blocked (chassis IDs, IPs, BGP AS unknown) — do not
+deploy. **CML** still carries BXT's chassis IDs and IPs; real hardware values
+are unknown.
+
+---
+
+## How it works
+
+A single source of truth generates per-site Terraform roots:
 
 ```
-UX2/
-├── globals.yaml                  # Org-wide facts: org-name, AS numbers, DC hub identity
-├── .gitignore
-│
-├── common/                       # Org-wide system profile parameters
-│   ├── aaa.yaml                  # TACACS servers, auth order
-│   ├── ntp.yaml                  # NTP servers, timezone
-│   ├── banner.yaml               # MOTD and login banner
-│   ├── snmp.yaml                 # SNMP communities, trap destinations
-│   └── logging.yaml              # Syslog servers, log levels
-│
-├── modules/                      # Shared, region-agnostic modules
-│   ├── config-group/             # sdwan_configuration_group
-│   ├── transport/                # WAN interface parcels, VPN 0, OSPF underlay
-│   ├── tloc-ext/                 # TLOC extension sub-interface parcels (optional)
-│   ├── cli-addon/                # CLI add-on profile + parcels (DC hub only)
-│   ├── service/                  # Service LAN VPN, campus BGP/OSPF, route-maps
-│   ├── system-profile/           # AAA, NTP, Banner, SNMP, Logging parcels
-│   ├── policy-group/             # Regional policy: topology, QoS, app-route SLA
-│   ├── policy-override/          # Per-site additive policy parcels (optional)
-│   └── site/                     # Top-level composition: feature profiles + all modules + device attach
-│
-└── regions/
-    ├── dc-hub/                   # Combined stack: hub policy + hub site
-    │   ├── sites/dc-hub.yaml
-    │   ├── policy.yaml
-    │   ├── main.tf
-    │   ├── variables.tf
-    │   ├── outputs.tf
-    │   └── provider.tf
-    │
-    ├── na/
-    │   ├── policy/               # Isolated stack — NA regional policy; outputs policy_id
-    │   ├── nyc/                  # Isolated stack — NYC site only
-    │   ├── chicago/              # Isolated stack — Chicago site only
-    │   ├── sites/                # YAML files only (nyc.yaml, chicago.yaml)
-    │   └── policy.yaml
-    │
-    └── emea/
-        ├── policy/               # Isolated stack — EMEA regional policy
-        ├── paris/                # Isolated stack — Paris site only
-        ├── london/               # Isolated stack — London site only
-        ├── sites/                # YAML files only (paris.yaml, london.yaml)
-        └── policy.yaml
+globals.yaml          fabric-wide constants (NTP, DSCP, AS numbers, …)
+templates/            YAML structure, one directory per variant
+  _shared/            system, policy-objects, application-priority — all variants
+  branch/             branch-a / branch-b service, transport, config-group, …
+  dc/                 DC hub service, transport, CLI add-on, config-group, …
+values/               one file per site — site_code, variant, site_id, device_variables
+  aar/                per-site traffic policy (AAR + QoS, one file mandatory per site)
+variants.yaml         maps each variant to the list of template files it uses
+generate.py           renders templates/ + values/ → sites/<site>/data/*.yaml + .tf roots
+validate_model.py     offline checks — run before every plan
+```
+
+`generate.py` substitutes `__SITE__` with the site code and `__GLOBAL:<key>__`
+with the corresponding value from `globals.yaml`, then copies
+`root-template/*.tf` into each site root. **Never edit files under `sites/`**
+— they are overwritten on the next run.
+
+```
+sites/                GENERATED — gitignored, do not hand-edit
+  bxt/
+    data/*.yaml       rendered NaC YAML for this site
+    main.tf
+    providers.tf
+    terraform.tfstate  state stays on the machine that ran apply
 ```
 
 ---
 
-## State isolation
-
-State isolation is enforced at two levels and is a hard architectural requirement — not a convenience.
-
-**Across regions**: `na/` and `emea/` never share a state file, lock file, or `terraform apply` invocation. A change in Paris cannot touch NYC under any circumstances.
-
-**Within a region**: each branch site has its own sub-stack with its own `terraform.tfstate`. A `terraform apply` in `nyc/` cannot reach `chicago/` resources even with a bad `-target`.
-
-Each Terraform stack is a leaf directory containing `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf`, and (after first init) its own `.terraform/` and `terraform.tfstate`.
-
----
-
-## Quickstart
-
-### Prerequisites
-
-- Terraform >= 1.3
-- Access to a vManage 20.13 instance
-- `terraform.tfvars` in each stack directory (gitignored) — see [Credentials](#credentials)
-
-### First deployment (new region)
+## Quick start
 
 ```bash
-# 1. Initialise and apply the regional policy stack first
-cd regions/na/policy
-terraform init -upgrade
-terraform plan -out=tfplan
-# Review plan — must only create policy resources
-terraform apply tfplan
+pip install -r requirements.txt
 
-# 2. Then apply each site stack independently
-cd ../nyc
-terraform init -upgrade
-terraform plan -out=tfplan
-terraform apply tfplan
+python3 generate.py                # regenerate all sites
+python3 generate.py --site bxt     # regenerate one site
+python3 generate.py --strict       # abort if any placeholder remains
+python3 validate_model.py          # cross-checks — run before every plan
 
-cd ../chicago
-terraform init -upgrade
+cd sites/bxt/
+export SDWAN_URL=https://<vmanage>:<port>
+export SDWAN_USERNAME=<user>
+export SDWAN_PASSWORD=<password>
+export SDWAN_INSECURE=true
+terraform init
 terraform plan -out=tfplan
+# review the plan, then:
 terraform apply tfplan
 ```
 
-The DC hub is a single combined stack:
-
-```bash
-cd regions/dc-hub
-terraform init -upgrade
-terraform plan -out=tfplan
-terraform apply tfplan
-```
-
-### Day-2 site change
-
-```bash
-# Edit the site YAML
-vim regions/na/sites/nyc.yaml
-
-# Plan and apply only that site stack
-cd regions/na/nyc
-terraform plan -out=tfplan
-terraform apply tfplan
-```
-
-### Policy change (affects all sites in the region on their next apply)
-
-```bash
-# Edit the regional policy YAML
-vim regions/na/policy.yaml
-
-# Re-apply only the policy stack
-cd regions/na/policy
-terraform plan -out=tfplan
-terraform apply tfplan
-
-# Site stacks read policy_id as data — no re-apply needed unless the ID changed
-```
+> **State warning**: `sites/` is gitignored. The Terraform state lives only on
+> the machine that ran `apply` (the jump host, as of 2026-09-04). Running
+> `terraform apply` from a stateless clone will attempt to recreate everything
+> and fail on duplicate parcel names.
 
 ---
 
-## Credentials
+## Adding a site
 
-Each stack reads credentials from its own `terraform.tfvars` (gitignored) or from environment variables. Never hardcode credentials in `.tf` files.
-
-**`terraform.tfvars` example** (per stack directory):
-
-```hcl
-sdwan_url      = "https://vmanage.acme.corp:8443"
-sdwan_username = "admin"
-sdwan_password = "changeme"
-sdwan_insecure = true
-tacacs_key     = "supersecret"
-
-# DC hub only:
-ospf_md5_secret = "ospfsecret"
-```
-
-**Environment variables** (alternative to tfvars):
-
-```bash
-export SDWAN_URL="https://vmanage.acme.corp:8443"
-export SDWAN_USERNAME="admin"
-export SDWAN_PASSWORD="changeme"
-export SDWAN_INSECURE="true"
-```
+1. Create `values/<site>.yaml` (pick a variant, assign a globally unique `site_id`).
+2. Create `values/aar/<SITE>.yaml` (traffic policy — mandatory, `generate.py` aborts without it).
+3. Run `python3 generate.py --site <site>` and `python3 validate_model.py`.
+4. `cd sites/<site>/ && terraform init && terraform plan`.
 
 ---
 
-## Adding a new site
+## Key files
 
-1. Check `globals.yaml` and all existing `regions/*/sites/*.yaml` to find the next available `site_id` — must be globally unique across all regions.
-2. Create `regions/<region>/sites/<city>.yaml` using the appropriate variant:
-   - **Variant A** — dual internet + MPLS + TLOC-EXT (4 TLOCs per cEdge): copy from `nyc.yaml`
-   - **Variant B** — internet-only, no MPLS (2 TLOCs per cEdge): copy from `chicago.yaml`
-3. Create the site sub-stack directory `regions/<region>/<city>/` with `main.tf`, `variables.tf`, `outputs.tf`, `provider.tf` — copy from an existing site and update the site name and YAML path.
-4. Update the spoke site list in `modules/policy-group/main.tf` (`sdwan_policy_object_site_list.spokes`) to include the new `site_id`.
-5. Run `terraform init -upgrade` and `terraform plan` from the new site directory.
-
----
-
-## Site YAML structure
-
-Every site YAML begins with `system:` (site-specific overrides), followed by topology and transport fields, then service VPN definitions.
-
-### Full branch (Variant A) — dual internet + MPLS
-
-```yaml
-# ── Site-specific system overrides ─────────────────────────────────────────
-system:
-  snmp:
-    location: "NYC - 1 Main Street - Floor 3"
-# ───────────────────────────────────────────────────────────────────────────
-
-site_id: 200
-system_ip_a: 10.0.1.1
-system_ip_b: 10.0.1.2
-hostname_a: nyc-cedge-01
-hostname_b: nyc-cedge-02
-chassis_a: "CSR1000V-..."
-chassis_b: "CSR1000V-..."
-
-transports:
-  custom1:                          # ISP-A
-    interface: GigabitEthernet2
-    dhcp: true
-  custom2:                          # ISP-B
-    interface: GigabitEthernet3
-    dhcp: true
-  private1:                         # Own MPLS — OSPF underlay toward PE
-    interface: GigabitEthernet4
-    ip: 192.168.1.1
-    mask: 255.255.255.252
-    ospf:
-      area: 0
-
-tloc_ext:
-  port: GigabitEthernet5
-  sub_if_extend:
-    sub_interface: GigabitEthernet5.101
-    vlan: 101
-  sub_if_receive:
-    sub_interface: GigabitEthernet5.102
-    vlan: 102
-
-cli_addon: ~
-route_maps: {}
-
-service_vpns:
-  - vpn: 0
-    name: TRANSPORT
-
-  - vpn: 10
-    name: LAN
-    campus_interface:
-      port: GigabitEthernet6
-      vrfs:
-        - name: CORP
-          cedge_a:
-            vlan: 3110
-            ip: 10.10.1.1
-            mask: 255.255.255.252
-            bgp:
-              neighbor_ip: 10.10.1.2
-              route_map_in: ~
-              route_map_out: ~
-            ospf: ~
-          cedge_b:
-            vlan: 3111
-            ip: 10.10.2.1
-            mask: 255.255.255.252
-            bgp:
-              neighbor_ip: 10.10.2.2
-              route_map_in: ~
-              route_map_out: ~
-            ospf: ~
-          redistribute_omp: true
-        - name: INFRA
-          cedge_a:
-            vlan: 3120
-            ip: 10.20.1.1
-            mask: 255.255.255.252
-            bgp:
-              neighbor_ip: 10.20.1.2
-              route_map_in: ~
-              route_map_out: ~
-            ospf: ~
-          cedge_b:
-            vlan: 3121
-            ip: 10.20.2.1
-            mask: 255.255.255.252
-            bgp:
-              neighbor_ip: 10.20.2.2
-              route_map_in: ~
-              route_map_out: ~
-            ospf: ~
-          redistribute_omp: true
-
-omp_advertise_bgp: true
-policy_override: ~
-```
-
-### Internet-only branch (Variant B)
-
-Same structure, but `transports` has only `custom1`/`custom2` (no `private1`), and `tloc_ext: ~`.
-
----
-
-## Key design decisions
-
-### Data-driven transports
-
-The `transports` map is keyed by vManage TLOC color (`custom1`, `custom2`, `private1`). The transport module does `for_each` directly over this map — one WAN interface parcel per entry, nothing more. Absent transport = absent config. **Color keys are immutable once a site is deployed** — they become Terraform state addresses and a rename is a destroy+create that flaps the TLOC.
-
-### TLOC extension
-
-Optional, branch-only. When `tloc_ext` is non-null, two sub-interface parcels are created inside the shared transport feature profile — one to extend own `private1` to the peer, one to receive the peer's. The result is 4 TLOCs per cEdge (`custom1`, `custom2`, `private1` own, `private2` peer). DC hub sets `tloc_ext: ~` — its upstream fusion router provides MPLS redundancy directly.
-
-### Campus peering protocol
-
-Each cEdge has exactly one of `bgp` or `ospf` sub-blocks per VRF (the other is `~`). The service module splits campus peers into `bgp_peers` and `ospf_peers` maps and creates the appropriate resource type per entry. cEdge-A and cEdge-B always use different VLANs for the same VRF.
-
-### CLI add-on (DC hub)
-
-The DC hub connects to the campus switch via a port-channel. No native UX2 parcel exists for LAG/LACP as of vManage 20.13. The solution is a `sdwan_cli_feature_profile` with two `sdwan_cli_config_feature` parcels:
-
-- **`port_channel`** — LAG member `channel-group` config + Port-channel sub-interfaces (OSPF P2P with MD5, PIM DR priority per device)
-- **`supplemental`** — VLAN SVI PIM, BFD template, BGP fall-over bfd, BUF-FILTER ACL, PnP startup VLAN
-
-CLI uses two-stage substitution: `${...}` resolved by Terraform `templatestring()` before storage in vManage (same for all devices at the site); `{{variable_name}}` resolved per device at push time via the `variables` map on the attach resource.
-
-### Common system profile
-
-Org-wide system parameters (AAA, NTP, Banner, SNMP, Logging) live in `common/*.yaml`. Site-specific overrides go in the `system:` block at the top of each site YAML. The `modules/system-profile` module merges them — site values win on conflict. Sensitive values (TACACS key, OSPF MD5 secret) are `sensitive = true` Terraform variables — never in YAML.
-
-### `pseudo_commit_timer = 300`
-
-Mandatory in every device attach. Baked into `modules/site` as a constant so it cannot be forgotten on a new site.
-
----
-
-## DSCP reference
-
-The provider rejects PHB keyword strings. Always use decimal integers:
-
-| PHB | Decimal |
-|-----|---------|
-| EF | 46 |
-| AF11 | 10 |
-| AF21 | 18 |
-| AF31 | 26 |
-| AF41 | 34 |
-| CS5 | 40 |
-| CS6 | 48 |
-| default / BE | 0 |
-
----
-
-## Useful commands
-
-```bash
-# Format all Terraform files (run from repo root)
-terraform fmt -recursive
-
-# Validate a specific stack
-cd regions/na/nyc && terraform validate
-
-# Inspect state for a site
-terraform state list
-terraform state show 'module.site.module.config_group.sdwan_configuration_group.this'
-
-# Plan scoped to a single module
-terraform plan -target='module.site'
-
-# Read the regional policy ID output
-cd regions/na/policy && terraform output policy_id
-```
-
----
-
-## Hard rules
-
-- No UX1 resources: `sdwan_feature_template`, `sdwan_cli_template_feature_template`, `sdwan_cli_device_template`
-- No root-level `main.tf` spanning multiple regions
-- No shared or remote backend — local backend only, one state file per stack directory
-- No `private2` key in `transports` — derived via TLOC-EXT, never a directly configured circuit
-- `omp_advertise_bgp` is top-level and device-wide — never nest it under a VPN or VRF entry
-- Never run `terraform apply` without reviewing the plan first
-- Never commit `terraform.tfvars`, `*.tfstate`, or `.terraform/`
+| File | Purpose |
+|------|---------|
+| `AGENTS.md` | Full design reference and hard rules for AI agents and operators |
+| `UX2_PROJECT.md` | Project status — what is done, blocked, deferred |
+| `globals.yaml` | Fabric-wide constants |
+| `variants.yaml` | Maps variant names to their template file lists |
+| `generate.py` | The generator — read its docstring for the full pipeline |
+| `validate_model.py` | Offline validator — run before every `terraform plan` |
+| `DATA/policies.json` | UX1 vManage export (migration reference) |
+| `DATA/valid_conf/` | Anonymised UX1 device configs (diff target) |
+| `DATA/generated_conf/` | Last known as-deployed config (bxtdw01, 2026-08-28) |
