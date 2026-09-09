@@ -7,7 +7,7 @@ sortie de contrôle) plutôt que « vérifié ».
 `AGENTS.md` reste la référence des règles et des mécanismes. Ce document-ci ne
 porte que l'état d'avancement.
 
-**Dernière mise à jour : 2026-09-04**
+**Dernière mise à jour : 2026-09-07**
 
 ---
 
@@ -44,6 +44,10 @@ Application Priority.
 - [ ] `values/bel.yaml` — `vpn512_desc` manquant sur les 2 routeurs (seul échec
       `validate_model.py` restant)
 - [ ] `values/bel.yaml` — chassis_id, IP, AS BGP encore placeholders
+- [ ] `values/bel.yaml` — CLI add-on (DC hub) : `pc_id`, `pc_member1`, `pc_member2`,
+      `pnp_startup_vlan`, `pim_rp_address`, `campus_vlan_corp`, `campus_vlan_infra`
+      — tous `PLACEHOLDER` pour l'instant ; renseigner avec les vraies valeurs hardware
+- [ ] `globals.yaml` — `cflowd.collector_ip` (IP réelle du collecteur NetFlow/IPFIX)
 - [ ] `values/cml.yaml` — chassis_id, hostnames, IP, interfaces encore ceux de BXT
 - [x] `known_object_names.yaml` — ajouter `FABRIC_SECURITY` (faux positif du scan :
       chaîne de description dans `system.yaml:64`, pas une valeur à remplir)
@@ -117,17 +121,31 @@ Application Priority.
 
 ## 7. Hors périmètre / différé
 
-- [ ] `sites/fabric/` — à recadrer autour de cflowd + control policies NYC/NYD.
-      L'export ne contient aucun hub-and-spoke, et aucun de ces objets ne
-      concerne BEL/BXT/CML
+- [ ] `sites/fabric/` — cflowd généré (2026-09-07, `generate.py` + `validate_model.py`
+      passent). Il reste à appliquer (renseigner `cflowd.collector_ip` d'abord).
+      Control policies NYC/NYD : pas encore modélisées (hors périmètre lab)
 - [ ] `OSPF_TO_OMP_DNEY_DEFAULT`
 - [ ] `OMP_TO_BGP_2000_MED`
-- [ ] DC — port-channel LACP réel du LAG campus, serveurs AAA/radius réels,
-      adressage transport DC dérivé et non exporté
+- [ ] DC — CLI add-on template écrit (LACP, PnP, PIM) ; valeurs hardware à renseigner
+      (voir §1). Serveurs AAA/radius réels, adressage transport DC : non exporté
 
 ---
 
 ## Acquis
+
+### Fonctionnalités ajoutées (2026-09-07)
+
+- [x] **DC CLI add-on** — template `templates/dc/cli.yaml` réécrit avec LACP
+      port-channel, PnP startup VLAN, PIM multicast. Variables `{{pc_id}}` /
+      `{{pc_member1/2}}` / `{{pnp_startup_vlan}}` / `{{pim_rp_address}}` /
+      `{{pim_dr_priority}}` / `{{campus_vlan_corp/infra}}` — syntaxe vManage,
+      TODO:verify au premier push device BEL
+- [x] **cflowd centralized policy** — `templates/fabric/cflowd.yaml` + root
+      `sites/fabric/` (variant `fabric`). `generate.py` et `validate_model.py`
+      passent. `sites/fabric/` committé dans git (pas de données sensibles).
+      Appliquer après avoir renseigné `cflowd.collector_ip` dans `globals.yaml`
+- [x] **Variant `fabric`** — `generate.py` étendu : pas de `site_id`, pas de
+      `device_variables`, pas de shared_templates, pas d'AAR ni de `site-values.yaml`
 
 ### Sites
 

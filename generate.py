@@ -82,7 +82,7 @@ def _load_variants() -> tuple:
 
 VARIANTS, SHARED_TEMPLATES = _load_variants()
 
-REQUIRED_VALUE_KEYS = ("site_code", "variant", "site_id", "device_variables")
+REQUIRED_VALUE_KEYS = ("site_code", "variant")
 
 
 def load_values(site_file: pathlib.Path) -> dict:
@@ -96,6 +96,13 @@ def load_values(site_file: pathlib.Path) -> dict:
             f"{site_file}: unknown variant '{data['variant']}', "
             f"must be one of {sorted(VARIANTS)}"
         )
+    # Fabric roots have no physical site — site_id and device_variables are absent.
+    if data["variant"] != "fabric":
+        for k in ("site_id", "device_variables"):
+            if data.get(k) is None:
+                raise ValueError(
+                    f"{site_file}: missing required key '{k}' for non-fabric variant"
+                )
     return data
 
 
@@ -246,7 +253,10 @@ def generate_site(values_file: pathlib.Path, globals_data: dict, findings: dict)
     # _shared/ and the variant dirs.  Basenames must therefore be unique.
     written: dict = {}
 
-    for rel_path in SHARED_TEMPLATES + VARIANTS[variant]:
+    # Fabric roots render only their own templates — shared_templates are
+    # per-device feature profiles that must not appear in a centralized-policy root.
+    template_list = VARIANTS[variant] if variant == "fabric" else SHARED_TEMPLATES + VARIANTS[variant]
+    for rel_path in template_list:
         src = TEMPLATES / rel_path
         if src.name in written:
             raise ValueError(
@@ -259,36 +269,38 @@ def generate_site(values_file: pathlib.Path, globals_data: dict, findings: dict)
         (data_dir / src.name).write_text(rendered, encoding="utf-8")
         scan_placeholders(rendered, f"{site_dir.name}/data/{src.name}", findings)
 
-    # Per-site app-aware routing (decision 2026-09-03).  Unlike everything else
-    # in the Application Priority profile, the AAR cannot be shared: its
-    # `preferred_colors` may only name colors the site's own transports carry,
-    # and the sites already differ (BXT private1+private2, BEL private1 only,
-    # CML internet-only).  So it comes from values/, one file per site, rendered
-    # through the SAME pipeline as templates/ (__SITE__ and __GLOBAL: apply).
-    #
-    # REQUIRED, not optional: a missing file means a site whose traffic gets no
-    # app-aware routing at all — silently, since neither terraform nor vManage
-    # has any way to know an AAR was intended.  Fail loudly instead.
-    if "aar.yaml" in written:
-        raise ValueError(
-            f"{site_code}: template '{written['aar.yaml']}' renders to "
-            f"data/aar.yaml, which is reserved for values/aar/<site>.yaml"
-        )
-    aar_src = AAR_VALUES / f"{site_code.lower()}.yaml"
-    if not aar_src.exists():
-        raise ValueError(
-            f"{site_code}: missing app-aware routing file '{aar_src}'. "
-            f"Every site needs one — copy the closest existing site's file and "
-            f"set preferred_colors to colors this site actually has "
-            f"(see values/aar/_README.md)."
-        )
-    rendered = render_template(aar_src, site_code, globals_data)
-    (data_dir / "aar.yaml").write_text(rendered, encoding="utf-8")
-    scan_placeholders(rendered, f"{site_dir.name}/data/aar.yaml", findings)
+    # Per-site AAR and device attach — not applicable to fabric roots (no devices).
+    if variant != "fabric":
+        # Per-site app-aware routing (decision 2026-09-03).  Unlike everything else
+        # in the Application Priority profile, the AAR cannot be shared: its
+        # `preferred_colors` may only name colors the site's own transports carry,
+        # and the sites already differ (BXT private1+private2, BEL private1 only,
+        # CML internet-only).  So it comes from values/, one file per site, rendered
+        # through the SAME pipeline as templates/ (__SITE__ and __GLOBAL: apply).
+        #
+        # REQUIRED, not optional: a missing file means a site whose traffic gets no
+        # app-aware routing at all — silently, since neither terraform nor vManage
+        # has any way to know an AAR was intended.  Fail loudly instead.
+        if "aar.yaml" in written:
+            raise ValueError(
+                f"{site_code}: template '{written['aar.yaml']}' renders to "
+                f"data/aar.yaml, which is reserved for values/aar/<site>.yaml"
+            )
+        aar_src = AAR_VALUES / f"{site_code.lower()}.yaml"
+        if not aar_src.exists():
+            raise ValueError(
+                f"{site_code}: missing app-aware routing file '{aar_src}'. "
+                f"Every site needs one — copy the closest existing site's file and "
+                f"set preferred_colors to colors this site actually has "
+                f"(see values/aar/_README.md)."
+            )
+        rendered = render_template(aar_src, site_code, globals_data)
+        (data_dir / "aar.yaml").write_text(rendered, encoding="utf-8")
+        scan_placeholders(rendered, f"{site_dir.name}/data/aar.yaml", findings)
 
-    site_values = build_site_values_yaml(values, globals_data)
-    (data_dir / "site-values.yaml").write_text(site_values, encoding="utf-8")
-    scan_placeholders(site_values, f"{site_dir.name}/data/site-values.yaml", findings)
+        site_values = build_site_values_yaml(values, globals_data)
+        (data_dir / "site-values.yaml").write_text(site_values, encoding="utf-8")
+        scan_placeholders(site_values, f"{site_dir.name}/data/site-values.yaml", findings)
 
     # Root .tf files are overwritten in place (copy, not rmtree+copy) so any
     # state/lock files sitting next to them are left untouched.
@@ -342,6 +354,9 @@ def main():
             data = load_values(vf)
         except ValueError as e:
             sys.exit(str(e))
+        # Fabric roots have no physical site_id, chassis_id, or system_ip.
+        if data["variant"] == "fabric":
+            continue
         sid = data["site_id"]
         # The per-router device_variables site_id is what actually reaches the
         # device attach (build_site_values_yaml lets it win), while THIS

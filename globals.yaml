@@ -193,3 +193,20 @@ qos_hosts:
     - "TUBE_SERVER_IP/32"          # fill in real CIDR
   scavenger_host_prefixes:
     - "SCAVENGER_HOST_IP/32"       # fill in real CIDR
+
+# ---------------------------------------------------------------------------
+# cflowd (NetFlow/IPFIX export — fabric-wide centralized policy)
+# Used by templates/fabric/cflowd.yaml.  Must live in a single fabric-level
+# root (not per site) to avoid PPARC0012 (tenant-wide policy name uniqueness).
+# Fill in collector_ip before applying sites/fabric/.
+# ---------------------------------------------------------------------------
+cflowd:
+  collector_ip: CFLOWD_COLLECTOR_IP  # fill in real collector IP
+  vpn: 10
+  port: 2055
+  transport: transport_udp
+  source_interface: Loopback10
+  active_flow_timeout: 60
+  inactive_flow_timeout: 30
+  sampling_interval: 1
+  flow_refresh: 60

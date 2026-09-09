@@ -1,0 +1,17 @@
+# values/fabric.yaml
+#
+# Synthetic "site" for the fabric-wide centralized policy root.
+# This is NOT a physical site — it has no site_id, no routers, no device
+# attach.  generate.py skips all per-device checks for variant: fabric and
+# renders only templates/fabric/*.yaml into sites/fabric/data/.
+#
+# sites/fabric/ is committed to git (unlike the per-device roots) because:
+#   - it carries no sensitive data (no chassis IDs, no credentials)
+#   - it is applied rarely and on purpose; having it in git makes it auditable
+# Its terraform.tfstate, .terraform/, and .terraform.lock.hcl are still
+# gitignored by the blanket *.tfstate / .terraform/ rules.
+
+site_code: FABRIC
+variant: fabric
+# site_id and device_variables intentionally absent — not applicable to
+# centralized policy roots.

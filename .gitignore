@@ -4,7 +4,12 @@
 # Generated per-site Terraform roots — rebuild any time with generate.py.
 # This also keeps the live terraform.tfstate / apply logs (real chassis
 # serials, internal IPs) out of git.
-sites/
+# sites/fabric/ is intentionally NOT excluded: it holds centralized-policy
+# templates (no chassis IDs, no credentials) and is applied deliberately.
+# Its terraform.tfstate / .terraform/ are still gitignored by the rules below.
+sites/bxt/
+sites/bel/
+sites/cml/
 
 # Terraform state and working dirs, wherever they appear
 *.tfstate
