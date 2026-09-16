@@ -13,8 +13,8 @@
 # (LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0).  Anything that differs by
 # variant belongs in templates/dc/ or templates/branch/ instead.
 #
-# 2026-07-24 — validated against nac-sdwan 1.4.0 module source
-# (module source available after terraform init: sites/*/.terraform/modules/sdwan/).  Inner key names below now match what the
+# 2026-07-24 — SCHEMA-VALIDATED against nac-sdwan 1.4.0 module source
+# (see SCHEMA-VALIDATION.md).  Inner key names below now match what the
 # module consumes (hostname_ip / vpn_id / severity ...).  Removed in that
 # pass, with reasons:
 #   aaa.*     — auth order references the TACACS group name, which is
@@ -144,8 +144,8 @@ ospf:
 #   CS0  = default / best-effort
 # Currently UNREFERENCED: the per-site policy-object QoS model was removed
 # after schema validation (the policy_object_profile is a single global
-# object and QoS maps live in application_priority_profiles).
-# Kept for the future app-priority modelling.
+# object and QoS maps live in application_priority_profiles — see
+# SCHEMA-VALIDATION.md §5).  Kept for the future app-priority modelling.
 # ---------------------------------------------------------------------------
 qos_dscp:
   ef:      46   # 101110b
@@ -193,20 +193,3 @@ qos_hosts:
     - "TUBE_SERVER_IP/32"          # fill in real CIDR
   scavenger_host_prefixes:
     - "SCAVENGER_HOST_IP/32"       # fill in real CIDR
-
-# ---------------------------------------------------------------------------
-# cflowd (NetFlow/IPFIX export — fabric-wide centralized policy)
-# Used by templates/fabric/cflowd.yaml.  Must live in a single fabric-level
-# root (not per site) to avoid PPARC0012 (tenant-wide policy name uniqueness).
-# Fill in collector_ip before applying sites/fabric/.
-# ---------------------------------------------------------------------------
-cflowd:
-  collector_ip: CFLOWD_COLLECTOR_IP  # fill in real collector IP
-  vpn: 10
-  port: 2055
-  transport: transport_udp
-  source_interface: Loopback10
-  active_flow_timeout: 60
-  inactive_flow_timeout: 30
-  sampling_interval: 1
-  flow_refresh: 60

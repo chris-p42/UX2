@@ -1,0 +1,25 @@
+# templates/dc/cli.yaml
+#
+# DC hub's campus LAN LAG has no native UX2 LAG parcel, so it's expressed as
+# a CLI add-on feature.  The UX2 CLI escape hatch is a CLI feature profile +
+# CLI config feature ONLY — never the UX1 constructs (sdwan_feature_template,
+# sdwan_cli_template_feature_template, sdwan_cli_device_template).
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0 (sdwan_features_cli.tf):
+#   cli_profiles[].config.cli_configuration (string) — validated.
+#
+# TODO: replace the placeholder CLI block with the real port-channel /
+# LACP config for the DC campus LAG.
+
+sdwan:
+  feature_profiles:
+    cli_profiles:
+      - name: "CLI-BEL"
+        description: "CLI add-on - BEL (campus port-channel)"
+        config:
+          name: "CLI-CONFIG-BEL"
+          # TODO: fill in real port-channel / LACP config
+          cli_configuration: |
+            interface Port-channel1
+             description CAMPUS-LAG
+             no shutdown

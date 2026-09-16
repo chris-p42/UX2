@@ -1,0 +1,104 @@
+# templates/branch/policy-objects.yaml
+#
+# Policy objects (vManage "Groups of Interest") shared by every branch site.
+# Added 2026-08-18 to back the outbound BGP route-maps in service.yaml /
+# service-b.yaml / service-routed.yaml.
+#
+# WHY ONE PROFILE PER SITE (PO-__SITE__) — the module leaves no choice:
+# sdwan_features_service.tf:2037 resolves a route-policy prefix-list match as
+#   try(sdwan_policy_object_ipv4_prefix_list.policy_object_ipv4_prefix_list[
+#       m.ipv4_address_prefix_list].id, null)
+# i.e. against the resource of the CURRENT Terraform root.  nac4 generates one
+# root per site, so an object living in a separate "global" root would not be
+# found: try() returns null and the `match ip address prefix-list` SILENTLY
+# disappears from the route-map (no error, no warning — a permit sequence that
+# matches everything).  Object and reference must be co-located in one root.
+# A shared-root design was evaluated and rejected on 2026-08-18 for this
+# reason; see CLAUDE.md "Policy objects".
+#
+# CONSEQUENCE: the definition below is written ONCE here and distributed by
+# generate.py into every branch site, so vManage ends up with N profiles
+# (PO-BXT, PO-CML, ...) each holding its OWN copy of every object.  Both the
+# profile AND the objects inside it carry the __SITE__ suffix — see NAMING.
+#
+# NOT in templates/_shared/: _shared applies to every variant including dc,
+# and the DC hub has no LAN-side BGP (templates/dc/service.yaml) hence no
+# route-map to feed.  CLAUDE.md hard rule: variant-specific facts belong in
+# templates/branch/.
+#
+# BOTH 2026-08-18 ASSUMPTIONS WERE SETTLED ON 2026-08-19, one each way:
+#   1. CONFIRMED TRUE — vManage does accept more than one policy-object
+#      profile per tenant.  PO-BXT was created without complaint; the apply
+#      only failed on the object inside it.  The 2026-07-24 claim in
+#      _shared/policy.yaml ("one per tenant") was wrong.
+#   2. CONFIRMED FALSE — object names are NOT unique per profile, they are
+#      unique across the whole tenant.  An apply run from sites/bxt was
+#      rejected because the name already existed in ANOTHER config group:
+#        PPARC0012 "Invalid Payload, Reason: Duplicate parcel name LO_BB_PFX
+#        found in config group CG-CML, existing parcelId: e23d075d-..."
+#      Cisco documents this: "An error occurs when a duplicate parcel name
+#      (for example, Site27-VPN1) exists in another configuration group [...]
+#      modify the intended name to ensure exclusivity" (Configuration Groups
+#      Reference Guide, "Using Configuration Groups").  Note Cisco's own
+#      example is a site-scoped name — the __SITE__ suffix below IS the
+#      vendor-documented convention, not a workaround.
+#
+# Designs considered and rejected on 2026-08-19 before landing here: a shared
+# "global objects" root (only workable with every site root importing the
+# objects -> 30 states co-owning them, no way to set prevent_destroy since the
+# resources live inside the module); a single fabric-wide root (breaks the
+# per-site independence the process relies on); and CLI add-ons for the
+# prefix-list route-maps (unmanageable at scale in a NaC context).
+#
+# NAMING: object names carry the __SITE__ suffix and are rendered VERBATIM
+# into the device running-config — `ip prefix-list LO_BB_PFX-BXT`.  That is
+# the accepted cost of tenant-wide name uniqueness: operational procedures and
+# verification scripts must treat the name as per-site (`show ip prefix-list
+# LO_BB_PFX` no longer works as-is).  Do not drop the suffix to "clean up" the
+# names — the second site to be applied would fail with PPARC0012.
+#
+# The ALL_CAPS_UNDERSCORE style is equally deliberate (it is the site's
+# operational naming standard, not the hyphenated style used for feature names
+# elsewhere in templates/).  It collides with generate.py's anonymised-
+# placeholder heuristic, so each name is listed in its KNOWN_OBJECT_NAMES
+# allowlist; the suffix does not need its own entry, since PLACEHOLDER_RE
+# stops at the hyphen.  Adding an object here means adding its name there.
+#
+# NOT suffixed: the route-map names in service*.yaml (OMP_TO_BGP_1000_MED...).
+# They are route-policy parcels too, so PPARC0012 may well apply to them as
+# well, but that is unproven and a site-specific route-map name has a real
+# operational cost.  Decision 2026-08-19: leave them alone and let the second
+# site's apply answer the question.
+
+sdwan:
+  feature_profiles:
+    policy_object_profile:
+      # Explicit name — without it the module falls back to its own default
+      # ("policy_objects", defaults/defaults.yaml:462), which is NOT per-site
+      # and would collide between roots.
+      name: "PO-__SITE__"
+      description: "Policy objects - __SITE__"
+
+      ipv4_prefix_lists:
+        # Bloomberg public ranges — matched by
+        # OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB (see service.yaml) to AS-path-
+        # prepend only those prefixes.
+        # Renders as: ip prefix-list LO_BB_PFX-BXT seq 5 permit 69.184.0.0/16 le 32
+        # (one `seq` line per entry, in list order — the seq numbers themselves
+        # are not modelled).  The module splits `prefix` on "/" so it must stay
+        # CIDR.
+        - name: "LO_BB_PFX-__SITE__"
+          description: "BloomBerg IP RANGES"
+          entries:
+            - prefix: 69.184.0.0/16 
+              le: 32
+            - prefix: 160.43.0.0/16 
+              le: 32
+            - prefix: 199.105.176.0/21 
+              le: 32
+            - prefix: 199.105.184.0/23 
+              le: 32
+            - prefix: 208.134.161.0/24 
+              le: 32
+            - prefix: 208.183.246.0/24 
+              le: 32

@@ -6,7 +6,7 @@
 # LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0 (site BXT).
 #
 # SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0
-# (sdwan_features_transport.tf).  Conventions:
+# (sdwan_features_transport.tf) — see SCHEMA-VALIDATION.md.  Conventions:
 #   - Each interface entry needs a STATIC `name:` (used as the feature name
 #     and Terraform for_each key — never rename post-deploy) plus
 #     `interface_name(_variable)` for the actual port, which may be

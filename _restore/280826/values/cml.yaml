@@ -1,0 +1,221 @@
+# values/cml.yaml
+#
+# Started as a duplicate of values/bxt.yaml (2026-07-30), redesigned for CML
+# (2026-07-30), updated to branch-b-routed (2026-08-03):
+#   - variant branch-b-routed: no MPLS, no TLOC-EXT (transport-b.yaml) and
+#     pure-edge LAN model (service-routed.yaml) — routed subinterfaces instead
+#     of switchport access ports.
+#   - CORP + INFRA BGP peering kept (fused VPN10 model, same as branch-a).
+#   - LAN handoff via routed subinterfaces on GigabitEthernet5:
+#       .3101 = INFRA (r1) / .3111 (r2)
+#       .3103 = CORP  (r1) / .3113 (r2)
+#       .62   = User VLAN 62 (both routers, same VLAN ID)
+#       .253  = PnP bootstrap VLAN 253 (both routers)
+#   - WAN uses Gi1 (ISP1) and Gi3 (ISP2) — CML hardware port numbering.
+#
+# Retains CML's site-id 3 (CML itself was moved to site-id 110 to keep
+# site_id unique across values/) and, since not otherwise specified,
+# CML's hostnames (pardw01/pardw02), chassis_id serials, IPs, and GPS/
+# timezone — these still describe CML's physical routers, not CML's, and
+# must be replaced with CML's own real values before deploying.
+#
+# SCHEMA NOTE: these variables feed the `<field>_variable:` references in
+# templates/ (UX2 config-group variables).  ALL IPv4 settings (address AND
+# mask) are device variables — no static IP values in the templates.
+# chassis_id is REQUIRED by the module for device attach.
+#
+# Anonymised placeholder strings (ROUTER_ID_*, BGP_*, CHASSIS_ID_*,
+# GPS_*) must be filled in with real values before deploying.
+# generate.py warns about every one it finds in the rendered output.
+
+site_code: CML
+variant: branch-b-routed
+# Must match device_variables.*.site_id below — the per-router value is
+# what actually reaches the device attach; this top-level field feeds the
+# cross-site uniqueness check (mismatch = generate.py error).
+site_id: 5
+
+device_variables:
+  router1:
+    hostname: cmldw01
+    system_ip:  10.0.0.5
+    site_id: 5
+    pseudo_commit_timer: 0  # config-group system variable; not a deploy gate
+    chassis_id: C8K-3A3DD488-D04F-3204-90F5-2E754FD14877  # REQUIRED: real chassis/serial from vManage
+
+    # System
+    port_offset: '0'
+    timezone: Europe/Zurich
+    gps_lat: '46.18948'
+    gps_lon: '6.11220'
+
+    # VPN 0 — DNS (Internet-side resolvers)
+    vpn0_dns_primary: 172.16.1.254 
+    vpn0_dns_secondary: 172.16.2.254
+
+    # VPN 0 — default-route next-hops (one per upstream; no MPLS on branch-b)
+    vpn0_gw_inet1: 172.16.1.254  # ISP1 gateway
+    vpn0_gw_inet2: 172.16.3.254  # ISP2 gateway
+
+    # VPN 0 — Internet 1 (color custom1)
+
+    vpn0_inet1_ifname: GigabitEthernet1
+    vpn0_inet1_ip: 172.16.1.5
+    vpn0_inet1_mask: 255.255.255.0  #not decimal
+    vpn0_inet1_bw_down: '100000'    # kbps
+    vpn0_inet1_shape: '100000'      # kbps
+    vpn0_inet1_color: custom1
+    vpn0_inet1_pref: '200'          # higher preference on primary router
+    vpn0_inet1_shutdown: 'false'   
+    #vpn0_inet1_nat: 'true'          #  ('true'/'false')
+    vpn0_inet1_desc: CML INTERNET 1   # CLI port description
+
+    # VPN 0 — Internet 2 (color custom2)
+    vpn0_inet2_ifname: GigabitEthernet3
+    vpn0_inet2_ip: 172.16.3.5
+    vpn0_inet2_mask: 255.255.255.0  #not decimal
+    vpn0_inet2_bw_down: '100000'    # kbps
+    vpn0_inet2_shape: '100000'      # kbps
+    vpn0_inet2_color: custom2
+    vpn0_inet2_pref: '200'          # higher preference on primary router
+    vpn0_inet2_shutdown: 'false'
+    # vpn0_inet2_nat: 'true'          # ('true'/'false')
+    vpn0_inet2_desc: CML INTERNET 2   # CLI port description
+
+    # VPN 10 — BGP toward SDA fabric: CORP + INFRA, same as CML/branch-a
+    bgp_as_number: '10.10'
+    bgp_router_id: 10.5.5.1
+    bgp_neighbor_remote_as: '65537'
+    bgp_neighbor_corp: 10.5.60.6
+    bgp_neighbor_infra: 10.5.60.2
+    cli_bgp_as: '10.10'
+    cli_neighbor_corp: 10.5.60.6  
+    cli_neighbor_infra: 10.5.60.2
+
+    # VPN 10 — Loopback10 (/32)
+    loopback10_ip: 10.5.5.1
+    loopback10_mask: 255.255.255.255
+    loopback10_shutdown: 'false'
+
+    # VPN 10 — PnP bootstrap VLAN 253 (per-router /29)
+    vlan253_ip: 10.5.253.1
+    vlan253_mask: 255.255.255.248
+    vlan253_dhcp_pool: 10.5.253.0
+    vlan253_dhcp_gw: 10.5.253.1
+    vlan253_dhcp_mask: 255.255.255.248
+    vlan253_desc: INT-FOR-OPENGEAR    # CLI description
+
+    # VPN 10 — User VLAN 62 (VRRP pair, /24)
+    vlan62_ip: 10.5.62.252
+    vlan62_mask: 255.255.255.0
+    vlan62_vrrp_ip: 10.5.62.254  # VRRP virtual IP (same on both routers)
+    vlan62_dhcp_pool: 10.5.62.0
+    vlan62_dhcp_gw: 10.5.62.254
+    vlan62_dhcp_mask: 255.255.255.0
+    vlan62_desc: INT-SDA-DHCP         # CLI description
+    # Routed subinterface on GigabitEthernet5 (shared parent port)
+    svi_vlan62_ifname: GigabitEthernet5.62
+
+    # VPN 10 — PnP VLAN 253 subinterface
+    svi_vlan253_ifname: GigabitEthernet5.253
+
+    # VPN 10 — SDA fabric uplinks via routed subinterfaces (/30 each)
+    # INFRA VLAN 
+    svi_infra_ifname: GigabitEthernet5.3101
+    svi_infra_ip: 10.5.60.1
+    svi_infra_mask: 255.255.255.252
+    svi_infra_shutdown: 'false'
+    svi_infra_desc: INT-VLAN-BGP-INFRA  # CLI description
+    # CORP VLAN 
+    svi_corp_ifname: GigabitEthernet5.3103
+    svi_corp_ip: 10.5.60.5
+    svi_corp_mask: 255.255.255.252
+    svi_corp_shutdown: 'false'
+    svi_corp_desc: INT-VLAN-BGP-CORP  # CLI description
+
+
+  router2:
+    hostname: cmldw02
+    system_ip: 10.0.0.6
+    site_id: 5
+    pseudo_commit_timer: 0  # config-group system variable; not a deploy gate
+    chassis_id: C8K-5BAF9C99-7676-401F-9DFE-B1A3BEBD644B  # REQUIRED: real chassis/serial from vManage
+
+    port_offset: '1'
+    timezone: Europe/Zurich
+    gps_lat: '46.18948'
+    gps_lon: '6.11220'
+
+    vpn0_dns_primary: 172.16.1.254 
+    vpn0_dns_secondary: 172.16.2.254
+
+    vpn0_gw_inet1: 172.16.1.254  # ISP1 gateway
+    vpn0_gw_inet2: 172.16.3.254  # ISP2 gateway
+
+    # CML numbering: GigabitEthernet0/0/0 (CML) -> GigabitEthernet1 (CML)
+    vpn0_inet1_ifname: GigabitEthernet1
+    vpn0_inet1_ip: 172.16.1.6
+    vpn0_inet1_mask: 255.255.255.0 #not decimal
+    vpn0_inet1_bw_down: '100000'
+    vpn0_inet1_shape: '100000'
+    vpn0_inet1_color: custom1
+    vpn0_inet1_pref: '100'        # lower preference on secondary router
+    vpn0_inet1_shutdown: 'false'
+    #vpn0_inet1_nat: 'true'       # ('true'/'false')
+    vpn0_inet1_desc: CML INTERNET 1   # CLI port description
+
+    # CML numbering: GigabitEthernet0/0/2 (CML) -> GigabitEthernet3 (CML)
+    vpn0_inet2_ifname: GigabitEthernet3
+    vpn0_inet2_ip: 172.16.3.6
+    vpn0_inet2_mask: 255.255.255.0
+    vpn0_inet2_bw_down: '100000'
+    vpn0_inet2_shape: '100000'
+    vpn0_inet2_color: custom2
+    vpn0_inet2_pref: '100'
+    vpn0_inet2_shutdown: 'false'
+    #vpn0_inet2_nat: 'true'       # DIA NAT overload on this WAN if ('true'/'false')
+    vpn0_inet2_desc: CML INTERNET 2   # CLI port description (carried over from CML)
+
+    # VPN 10 — BGP toward SDA fabric: CORP + INFRA, same as CML/branch-a
+    bgp_as_number: '10.10'
+    bgp_router_id: 10.5.5.6
+    bgp_neighbor_remote_as: '65537'
+    bgp_neighbor_corp: 10.5.60.10
+    bgp_neighbor_infra: 10.5.60.14
+    cli_bgp_as: '10.10'
+    cli_neighbor_corp: 10.5.60.10  
+    cli_neighbor_infra: 10.5.60.14
+
+    # VPN 10 — Loopback10 (/32)
+    loopback10_ip: 10.5.5.6
+    loopback10_mask: 255.255.255.255
+    loopback10_shutdown: 'false'
+
+    vlan253_ip: 10.5.253.9
+    vlan253_mask: 255.255.255.248
+    vlan253_dhcp_pool: 10.5.253.8
+    vlan253_dhcp_gw: 10.5.253.9
+    vlan253_dhcp_mask: 255.255.255.248
+    vlan253_desc: INT-FOR-OPENGEAR    # CLI description
+
+    vlan62_ip: 10.5.62.253
+    vlan62_mask: 255.255.255.0
+    vlan62_vrrp_ip: 10.5.62.254
+    vlan62_dhcp_pool: 10.5.62.0
+    vlan62_dhcp_gw: 10.5.62.254
+    vlan62_dhcp_mask: 255.255.255.0
+    vlan62_desc: INT-SDA-DHCP         # CLI description
+    svi_vlan62_ifname: GigabitEthernet5.62
+
+    svi_vlan253_ifname: GigabitEthernet5.253
+
+    svi_corp_ifname: GigabitEthernet5.3111
+    svi_corp_ip: 10.5.60.9
+    svi_corp_mask: 255.255.255.252
+    svi_corp_shutdown: 'false'
+    svi_corp_desc: INT-VLAN-BGP-CORP  # CLI description
+    svi_infra_ifname: GigabitEthernet5.3113
+    svi_infra_ip: 10.5.60.13
+    svi_infra_mask: 255.255.255.252
+    svi_infra_shutdown: 'false'
+    svi_infra_desc: INT-VLAN-BGP-INFRA  # CLI description

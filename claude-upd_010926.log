@@ -1,0 +1,27 @@
+# claude-upd_010926.log
+# Modifications apportées le 2026-09-01 (session Claude Code)
+# Contexte: implémentation Application Priority Profile (QoS + app-route) en UX2
+#
+# Références UX1 utilisées:
+#   Branch scheduler : LO_QOSMAP_V2 (depuis LO_BR_local_Policy_BGP)
+#   DC scheduler     : LO_QOSMAP V1 (depuis LO_DC_Local_Policy)
+#   App-route (AAR)  : LO_AAR 9 séquences (depuis LO_Central_Policy_V5)
+#   SLA classes      : LO_SLA_VOICE / LO_SLA_VIDEO / LO_SLA_COMMVAULT / LO_SLA_CUSTOM1-2
+#
+# Hors scope (sessions futures):
+#   OSPF_TO_OMP_DNEY_DEFAULT, OMP_TO_BGP_2000_MED, cflowd, control policies
+#
+# TODO avant plan sur jump host:
+#   globals.yaml: renseigner commvault.sin_server_prefixes, commvault.server_prefixes, backup.server_prefixes
+#   (les 3 autres placeholders SNMP/TACACS/OSPF_MD5_KEY sont antérieurs à cette session)
+#
+
+globals.yaml                              | MOD | ajout sections commvault.* + backup.* (placeholders CIDRs) + dhcp.dns_servers 10.10.10.10
+templates/branch/policy-objects.yaml     | MOD | ajout forwarding_classes (7 classes LO_VOICE…LO_BESTEFFORT), sla_classes (4), application_lists (LO_Teams_Video), ipv4_data_prefix_lists (Commvault/Backup via __GLOBAL:)
+templates/branch/application-priority.yaml | ADD | nouveau: APP-PRIORITY-__SITE__ avec QOS-__SITE__ (LO_QOSMAP_V2, 7 schedulers) + AAR-__SITE__ (6 séquences LO_AAR)
+templates/dc/policy-objects.yaml         | ADD | nouveau: PO-BEL avec forwarding_classes LO_QOSMAP V1 (8 classes), SLA classes, app lists, data prefix lists
+templates/dc/application-priority.yaml   | ADD | nouveau: APP-PRIORITY-BEL avec QOS-BEL (LO_QOSMAP V1, 8 schedulers) + AAR-BEL (mêmes 6 séquences)
+templates/dc/config-group.yaml           | MOD | ajout policy_object_profile: "PO-BEL"
+templates/_shared/policy.yaml            | MOD | ajout application_priority: "APP-PRIORITY-__SITE__" dans PG-__SITE__
+variants.yaml                            | MOD | ajout application-priority.yaml + policy-objects.yaml au variant dc; application-priority.yaml à branch-a/b/a-routed/b-routed
+known_object_names.yaml                  | MOD | ajout 22 noms: forwarding classes (LO_VOICE…LO_SCAVENGER), SLA classes (LO_SLA_*), data prefix lists (LO_COMMVAULT_*, LO_BACKUP_SERVERS), séquences AAR, tokens de description

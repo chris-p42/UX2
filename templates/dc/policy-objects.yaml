@@ -2,7 +2,7 @@
 #
 # DC-ONLY policy objects.  Everything the DC shares with the branches (profile
 # name, SLA classes, application lists, data prefix lists and the seven common
-# forwarding classes) lives in templates/_shared/policy-objects-common.yaml; the two
+# forwarding classes) lives in templates/_shared/policy-objects.yaml; the two
 # files merge into one PO-__SITE__ profile — see the SPLIT ACROSS FILES note
 # there.
 #

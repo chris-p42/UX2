@@ -10,7 +10,7 @@
 # a separate INFRA VRF/VPN here.
 #
 # SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0
-# (sdwan_features_service.tf).  Conventions:
+# (sdwan_features_service.tf) — see SCHEMA-VALIDATION.md.  Conventions:
 #   - service_profiles[].lan_vpns[] is a LIST; each VPN needs a static
 #     `name:` (feature name / for_each key) plus vpn_id.
 #   - Interfaces split by type: ethernet_interfaces[] (Loopback10) and

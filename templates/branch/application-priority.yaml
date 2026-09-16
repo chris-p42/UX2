@@ -2,12 +2,12 @@
 #
 # BRANCH-ONLY part of the Application Priority profile: the QoS scheduler.
 # The profile itself and both traffic policies (AAR + QoS classification) are
-# fabric-wide and live in templates/_shared/application-priority-common.yaml; the two
+# fabric-wide and live in templates/_shared/application-priority.yaml; the two
 # files merge into one APP-PRIORITY-__SITE__ profile (see the SPLIT ACROSS FILES
-# note in templates/_shared/policy-objects-common.yaml).
+# note in templates/_shared/policy-objects.yaml).
 #
 # Source: UX1 localized qosMap LO_QOSMAP_V2, from LO_BR_local_Policy_BGP.
-# Forwarding classes are declared in templates/_shared/policy-objects-common.yaml.
+# Forwarding classes are declared in templates/_shared/policy-objects.yaml.
 #
 # scheduling_type is derived by the module, not written here: queue 0 -> llq,
 # every other queue -> wrr (sdwan_features_application_priority.tf).  The

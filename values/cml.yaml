@@ -13,11 +13,11 @@
 #       .253  = PnP bootstrap VLAN 253 (both routers)
 #   - WAN uses Gi1 (ISP1) and Gi3 (ISP2) — CML hardware port numbering.
 #
-# CML's assigned lab site-id is 5.  Since real hardware values are unknown,
-# BXT's placeholder data is carried over (pardw01/pardw02 hostnames, BXT
-# chassis_id serials, IPs, GPS/timezone) — these describe BXT's physical
-# routers, not CML's, and must be replaced with CML's own real values
-# before deploying.
+# Retains CML's site-id 3 (CML itself was moved to site-id 110 to keep
+# site_id unique across values/) and, since not otherwise specified,
+# CML's hostnames (pardw01/pardw02), chassis_id serials, IPs, and GPS/
+# timezone — these still describe CML's physical routers, not CML's, and
+# must be replaced with CML's own real values before deploying.
 #
 # SCHEMA NOTE: these variables feed the `<field>_variable:` references in
 # templates/ (UX2 config-group variables).  ALL IPv4 settings (address AND

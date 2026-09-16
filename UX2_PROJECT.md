@@ -4,10 +4,10 @@ Liste de suivi du projet nac4. Tenir à jour à chaque session : cocher ce qui e
 fait, déplacer entre sections, et **noter la preuve** (message d'erreur, apply,
 sortie de contrôle) plutôt que « vérifié ».
 
-`AGENTS.md` reste la référence des règles et des mécanismes. Ce document-ci ne
+`CLAUDE.md` reste la référence des règles et des mécanismes. Ce document-ci ne
 porte que l'état d'avancement.
 
-**Dernière mise à jour : 2026-09-07**
+**Dernière mise à jour : 2026-09-04**
 
 ---
 
@@ -44,12 +44,8 @@ Application Priority.
 - [ ] `values/bel.yaml` — `vpn512_desc` manquant sur les 2 routeurs (seul échec
       `validate_model.py` restant)
 - [ ] `values/bel.yaml` — chassis_id, IP, AS BGP encore placeholders
-- [ ] `values/bel.yaml` — CLI add-on (DC hub) : `pc_id`, `pc_member1`, `pc_member2`,
-      `pnp_startup_vlan`, `pim_rp_address`, `campus_vlan_corp`, `campus_vlan_infra`
-      — tous `PLACEHOLDER` pour l'instant ; renseigner avec les vraies valeurs hardware
-- [ ] `globals.yaml` — `cflowd.collector_ip` (IP réelle du collecteur NetFlow/IPFIX)
 - [ ] `values/cml.yaml` — chassis_id, hostnames, IP, interfaces encore ceux de BXT
-- [x] `known_object_names.yaml` — ajouter `FABRIC_SECURITY` (faux positif du scan :
+- [ ] `known_object_names.yaml` — ajouter `FABRIC_SECURITY` (faux positif du scan :
       chaîne de description dans `system.yaml:64`, pas une valeur à remplir)
 
 ## 2. Prochaine étape — le déploiement
@@ -99,53 +95,19 @@ Application Priority.
 - [ ] `BACKUP_TO_COMMVAULT` — le match source d'UX1 était anonymisé
       `<IPNETWORK>` ; la règle est plus large qu'en production
 
-## 6. Code quality / nice-to-have
+## 6. Hors périmètre / différé
 
-- [ ] `--site` de `generate.py` matche le stem du fichier (ex. `bxt`) plutôt que
-      le `site_code` YAML (ex. `BXT`) — help text trompeur ; aligner les deux
-      ou corriger le help
-- [ ] Lock-file : `providers.tf` conseille de commiter `.terraform.lock.hcl`,
-      mais `sites/` est gitignor��e et régénérée — plutôt épingler la version du
-      provider dans `root-template/providers.tf` lui-même
-- [ ] `RENAME_MAP` dans `csv_to_values.py` : plusieurs colonnes convergent vers
-      `vpn0_default_route` (last-write-wins silencieux) — ajouter un assert qui
-      avertit quand deux colonnes écrivent des valeurs différentes sur la même clé
-- [ ] `requirements.txt` non pincé (`PyYAML>=6.0`) — épingler au moins une borne
-      majeure pour la reproductibilité
-- [ ] Pas d'entry point de validation globale : un mode `--check` sur `generate.py`
-      (unicité `site_id`, scan placeholders, clés `__GLOBAL:` résolvables, tous les
-      fichiers `VARIANTS` présents sur disque) rendrait un CI trivial
-- [ ] `templates/branch/transport-b.yaml` — son jeu de variables est une hypothèse
-      (branch-a moins MPLS/TLOC-EXT) ; vérifier contre un export réel branch-b
-      (CML est le premier site réel de cette variante)
-
-## 7. Hors périmètre / différé
-
-- [ ] `sites/fabric/` — cflowd généré (2026-09-07, `generate.py` + `validate_model.py`
-      passent). Il reste à appliquer (renseigner `cflowd.collector_ip` d'abord).
-      Control policies NYC/NYD : pas encore modélisées (hors périmètre lab)
+- [ ] `sites/fabric/` — à recadrer autour de cflowd + control policies NYC/NYD.
+      L'export ne contient aucun hub-and-spoke, et aucun de ces objets ne
+      concerne BEL/BXT/CML
 - [ ] `OSPF_TO_OMP_DNEY_DEFAULT`
 - [ ] `OMP_TO_BGP_2000_MED`
-- [ ] DC — CLI add-on template écrit (LACP, PnP, PIM) ; valeurs hardware à renseigner
-      (voir §1). Serveurs AAA/radius réels, adressage transport DC : non exporté
+- [ ] DC — port-channel LACP réel du LAG campus, serveurs AAA/radius réels,
+      adressage transport DC dérivé et non exporté
 
 ---
 
 ## Acquis
-
-### Fonctionnalités ajoutées (2026-09-07)
-
-- [x] **DC CLI add-on** — template `templates/dc/cli.yaml` réécrit avec LACP
-      port-channel, PnP startup VLAN, PIM multicast. Variables `{{pc_id}}` /
-      `{{pc_member1/2}}` / `{{pnp_startup_vlan}}` / `{{pim_rp_address}}` /
-      `{{pim_dr_priority}}` / `{{campus_vlan_corp/infra}}` — syntaxe vManage,
-      TODO:verify au premier push device BEL
-- [x] **cflowd centralized policy** — `templates/fabric/cflowd.yaml` + root
-      `sites/fabric/` (variant `fabric`). `generate.py` et `validate_model.py`
-      passent. `sites/fabric/` committé dans git (pas de données sensibles).
-      Appliquer après avoir renseigné `cflowd.collector_ip` dans `globals.yaml`
-- [x] **Variant `fabric`** — `generate.py` étendu : pas de `site_id`, pas de
-      `device_variables`, pas de shared_templates, pas d'AAR ni de `site-values.yaml`
 
 ### Sites
 
@@ -161,11 +123,7 @@ Application Priority.
       tous les types.** CML a créé `SYS-CML` avec ses parcels `global` / `omp`
       alors que BXT portait déjà les mêmes noms. Le suffixe `-<SITE>` reste
       donc requis pour les **policy objects** uniquement (PPARC0012, 2026-08-19),
-      pas pour l'ensemble du dépôt.
-- [x] **Les noms de route-maps ne nécessitent PAS de suffixe `-<SITE>`.** BXT et
-      CML ont tous les deux été appliqués avec `OMP_TO_BGP_1000_MED` et
-      `OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB` sans conflit PPARC0012 —
-      confirmé 2026-09-07.
+      pas pour l'ensemble du dépôt. *À confirmer d'un coup d'œil en vManage.*
 - [x] **`route_policies[]` `base_action` / `default_action`** — acceptés par
       vManage. Le rendu du route-map sur l'équipement reste à vérifier (§2)
 - [x] **`qos_policies[].target_interfaces` peut rester vide** — accepté

@@ -1,0 +1,226 @@
+# templates/branch/service.yaml
+#
+# Shared by both branch variants (branch-a, branch-b).  Modelled from the
+# UX1 export of LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0 (site BXT).
+#
+# CONFIRMED MODEL (user, 2026-07): CORP and INFRA are FUSED into the single
+# service VPN 10 on the SD-WAN fabric; they are separate Virtual Networks
+# only on the SDA (campus) side.  The router touches them as two /30 SVI
+# handoffs + one BGP neighbor each, all inside VPN 10.  Do not reintroduce
+# a separate INFRA VRF/VPN here.
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0
+# (sdwan_features_service.tf) — see SCHEMA-VALIDATION.md.  Conventions:
+#   - service_profiles[].lan_vpns[] is a LIST; each VPN needs a static
+#     `name:` (feature name / for_each key) plus vpn_id.
+#   - Interfaces split by type: ethernet_interfaces[] (Loopback10) and
+#     svi_interfaces[] (all the Vlan SVIs).  Each entry needs a static
+#     `name:`; the actual interface is `interface_name(_variable)`.
+#   - BGP is a separate named feature (bgp_features[]) referenced from the
+#     VPN via `bgp: <name>`; IPv4 peers use `ipv4_neighbors` (the module
+#     ignores the generic-looking `neighbors` key).
+#   - DHCP pools are separate named features (dhcp_servers[]) associated to
+#     an SVI via `dhcp_server: <name>`.  Pool is address+mask (static masks
+#     here; addresses are per-device variables).
+#   - VRRP rides the SVI as ipv4_vrrp_groups[] {id, address(_variable)}.
+#
+# TODO: BGP as_number was not captured by the UX1 variable export (it was a
+# template constant) — bgp_as_number is a placeholder device variable, fill
+# in values/<site>.yaml.  This now matters twice over: the AS-path prepend in
+# OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB below hardcodes 655370 (= AS 10.10 in
+# asplain, i.e. a self-prepend), so values/<site>.yaml MUST resolve
+# bgp_as_number to the same AS or the prepend is meaningless.
+#
+# Outbound route-policies wired 2026-08-18 (route_policies[] below) — the
+# old bgp_out_policy_* device variables are superseded and were never used.
+
+sdwan:
+  feature_profiles:
+    service_profiles:
+      - name: "SVC-__SITE__"
+        description: "Service profile - __SITE__"
+
+        # DHCP pools — associated to SVIs below by name
+        dhcp_servers:
+          # User VLAN 62 — same pool on both routers (VRRP pair)
+          - name: "DHCP-VLAN62"
+            pool_network_address_variable: vlan62_dhcp_pool
+            pool_subnet_mask_variable: vlan62_dhcp_mask
+            default_gateway_variable: vlan62_dhcp_gw
+          # PnP bootstrap VLAN 253 — per-router /29 pool
+          - name: "DHCP-VLAN253"
+            pool_network_address_variable: vlan253_dhcp_pool
+            pool_subnet_mask_variable: vlan253_dhcp_mask
+            default_gateway_variable: vlan253_dhcp_gw
+
+        # BGP toward the SDA border nodes — one neighbor per VN
+        bgp_features:
+          - name: "BGP-VPN10"
+            as_number_variable: bgp_as_number
+            router_id_variable: bgp_router_id
+            propagate_community: true 
+            always_compare_med: true
+            ipv4_redistributes:
+              - protocol: omp
+              - protocol: connected
+            # network 0.0.0.0 0.0.0.0 — advertise the default toward the SDA
+            # border.  MUST live here, not as an ipv4_neighbors entry: the
+            # module maps ipv4_networks[] on network_address/subnet_mask
+            # (sdwan_features_service.tf:93), whereas an ipv4_neighbors entry
+            # carrying those keys renders a peer with neither address nor
+            # remote-as and vManage rejects the whole parcel with
+            # SCHVALID0001 "Required But Missing Attributes data.neighbor[N]".
+            # Only advertises if a default is actually in the VPN 10 RIB (it
+            # arrives via OMP); for `default-information originate` instead,
+            # the module key is ipv4_default_originate (:99).
+            ipv4_networks:
+              - network_address: '0.0.0.0'
+                subnet_mask: '0.0.0.0'
+            ipv4_neighbors:
+              - address_variable: bgp_neighbor_corp
+                remote_as_variable: bgp_neighbor_remote_as
+                send_community: true
+                send_extended_community: true            
+                address_families:
+                  - family_type: ipv4-unicast
+                    # QUOTED deliberately: bare `off` is YAML-1.1 boolean false
+                    # (both yamldecode and PyYAML), which reaches the provider
+                    # as policy_type = "false" and is rejected at plan time.
+                    maximum_prefixes_reach_policy: "off"
+                    route_policy_out: "OMP_TO_BGP_1000_MED"
+              - address_variable: bgp_neighbor_infra
+                remote_as_variable: bgp_neighbor_remote_as
+                send_community: true
+                send_extended_community: true
+                address_families:
+                  - family_type: ipv4-unicast
+                    # QUOTED deliberately: bare `off` is YAML-1.1 boolean false
+                    # (both yamldecode and PyYAML), which reaches the provider
+                    # as policy_type = "false" and is rejected at plan time.
+                    maximum_prefixes_reach_policy: "off"
+                    route_policy_out: "OMP_TO_BGP_1000_MED"
+                
+                
+        route_policies:
+          # route-map OMP_TO_BGP_1000_MED permit 1
+          #  set metric 1000
+          # route-map OMP_TO_BGP_1000_MED deny 65535
+          - name: "OMP_TO_BGP_1000_MED"
+            description: "Outbound to SDA border - set MED 1000"
+            default_action: reject
+            sequences:
+              - id: 1
+                name: "SET_MED"
+                base_action: accept
+                protocol: ipv4
+                actions:
+                  metric: 1000
+
+          # Same, plus a 5x self-AS prepend on the Bloomberg ranges only.
+          # DEFINED BUT NOT ATTACHED (2026-08-18): route_policy_out is a
+          # by-name reference resolved at terraform apply, NOT a device
+          # variable — it can vary neither per router nor per site while the
+          # templates are shared.  Attaching this to a subset of branches
+          # requires a new variant in variants.yaml.  Decision pending.
+          - name: "OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB"
+            description: "Outbound to SDA border - MED 1000 + prepend on Bloomberg ranges"
+            default_action: reject
+            sequences:
+              - id: 1
+                name: "PREPEND_BB"
+                base_action: accept
+                protocol: ipv4
+                match_entries:
+                  # -> templates/branch/policy-objects.yaml.  The __SITE__
+                  # suffix is mandatory: parcel names are unique tenant-wide
+                  # (PPARC0012, 2026-08-19).  Both files are rendered per site,
+                  # so the two strings still match and the reference resolves.
+                  ipv4_address_prefix_list: "LO_BB_PFX-__SITE__"
+                actions:
+                  metric: 1000
+                  # 655370 = AS 10.10 asplain — self-prepend, see header TODO
+                  prepend_as_paths: [655370, 655370, 655370, 655370, 655370]
+              - id: 11
+                name: "SET_MED"
+                base_action: accept
+                protocol: ipv4
+                actions:
+                  metric: 1000
+
+        lan_vpns:
+          # The ONE branch service VPN (matches the UX1 /10/... paths)
+          - name: "VPN10"
+            vpn_id: 10
+            bgp: "BGP-VPN10"
+
+            ethernet_interfaces:
+              # Loopback10: mgmt-plane source (TACACS/NTP/syslog per
+              # globals.yaml) and routing anchor
+              - name: "LOOPBACK10"
+                description: "Mgmt-plane source / routing anchor"
+                interface_name: "Loopback10"
+                shutdown_variable: loopback10_shutdown
+                # Required by provider when ipv4_address_variable is set.
+                ipv4_address_type: static
+                ipv4_address_variable: loopback10_ip
+                ipv4_subnet_mask_variable: loopback10_mask
+
+            svi_interfaces:
+              # CORP SVI: /30 uplink into the SDA CORP VN
+              # (vlan3103 on r1 / vlan3113 on r2 — hence interface_name is
+              # a device variable)
+              - name: "SVI-CORP"
+                description: "SDA CORP VN handoff"
+                interface_description_variable: svi_corp_desc   # CLI description
+                interface_name_variable: svi_corp_ifname
+                shutdown_variable: svi_corp_shutdown
+                ipv4_address_variable: svi_corp_ip
+                ipv4_subnet_mask_variable: svi_corp_mask
+
+              # INFRA SVI: /30 uplink into the SDA INFRA VN
+              # (vlan3101 on r1 / vlan3111 on r2)
+              - name: "SVI-INFRA"
+                description: "SDA INFRA VN handoff"
+                interface_description_variable: svi_infra_desc  # CLI description
+                interface_name_variable: svi_infra_ifname
+                shutdown_variable: svi_infra_shutdown
+                ipv4_address_variable: svi_infra_ip
+                ipv4_subnet_mask_variable: svi_infra_mask
+
+              # User VLAN 62 — VRRP active/standby across the pair, same
+              # virtual IP and DHCP pool on both routers
+              - name: "SVI-VLAN62"
+                description: "User VLAN"
+                interface_description_variable: vlan62_desc     # CLI description
+                interface_name: "Vlan62"
+                ipv4_address_variable: vlan62_ip
+                ipv4_subnet_mask_variable: vlan62_mask
+                ipv4_vrrp_groups:
+                  - id: 62
+                    address_variable: vlan62_vrrp_ip
+                dhcp_server: "DHCP-VLAN62"
+
+              # PnP bootstrap VLAN 253 — per-router /29, no VRRP
+              - name: "SVI-VLAN253"
+                description: "PnP bootstrap VLAN"
+                interface_description_variable: vlan253_desc    # CLI description
+                interface_name: "Vlan253"
+                ipv4_address_variable: vlan253_ip
+                ipv4_subnet_mask_variable: vlan253_mask
+                dhcp_server: "DHCP-VLAN253"
+
+        # Campus trunk — carries the user VLAN + this router's two SDA
+        # uplink VLANs (62,3101,3103 on r1 / 62,3111,3113 on r2 at BXT).
+        # The physical port is hardware/site-specific and therefore a
+        # DEVICE VARIABLE (sw_lan_ifname), not a fixed value — set it per
+        # router in values/<site>.yaml (GigabitEthernet0/1/1 on the BXT
+        # C8200Ls).  Only the feature `name:` is static (it is the
+        # Terraform for_each key — never rename once deployed).
+        switchport_features:
+          - name: "SWITCHPORT-__SITE__"
+            description: "Campus trunk - __SITE__"
+            interfaces:
+              - name_variable: sw_lan_ifname
+                mode: trunk
+                shutdown_variable: sw_gi011_shutdown
+                trunk_allowed_vlans_variable: sw_gi011_vlans

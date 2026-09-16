@@ -1,22 +1,25 @@
 # site-map.yaml
 # Maps derived site_code → variant for csv_to_values.py.
 # Variant determines which template files generate.py pulls in:
-#   dc               → templates/dc/
-#   branch-a-routed  → templates/branch/ with MPLS TLOC-EXT, routed service
-#                      (transport-a.yaml + service-routed.yaml)
-#   branch-b-routed  → templates/branch/ without TLOC-EXT, routed service
-#                      (transport-b.yaml + service-routed.yaml)
+#   dc        → templates/dc/
+#   branch-a  → templates/branch/ with MPLS TLOC-EXT (transport-a.yaml)
+#   branch-b  → templates/branch/ without TLOC-EXT (transport-b.yaml)
 #
 # Real site codes used in the --site-code override below (anonymised exports
 # would otherwise both resolve to "SD-WAN"):
-#   BEL  — DC hub (LO_DC_DEVICE_TEMPLATE_V1.2, lab site-id 1, vedge-C8500-12X)
+#   BEL  — DC hub (LO_DC_DEVICE_TEMPLATE_V1.2, site-id 1100, vedge-C8500-12X)
 #   BXT  — Branch test-lab (LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0,
-#          lab site-id 3; UX1 export used 1405 — MPLS TLOC-EXT active)
-#   CML  — Branch internet-only (lab site-id 5; no MPLS/TLOC-EXT; LAN via
-#          routed subinterfaces on GigabitEthernet5; own interface numbering).
-#          Update device_variables (chassis_id, hostnames, IPs) before
-#          deploying — currently carries BXT placeholder values.
+#          deployed lab site-id 110 — moved from 3 on 2026-07-30 to free it for
+#          CML; the UX1 export used 1405 — MPLS TLOC-EXT active)
+#   CML  — started as a BXT duplicate on 2026-07-30, site-id 3, then
+#          redesigned to its own spec: variant branch-b (no MPLS/TLOC-EXT),
+#          same CORP+INFRA dual BGP peer (+ user VLAN 62) as BXT but on
+#          three untagged access ports (Gi5 INFRA / Gi6 CORP / Gi7 VLAN62)
+#          instead of a trunk — no 802.1Q on CML's VMs. Own interface
+#          numbering (GigabitEthernetN). Update its device_variables
+#          (chassis_id, hostnames, IPs) with CML's own real values before
+#          deploying.
 
 BEL: dc
-BXT: branch-a-routed
-CML: branch-b-routed
+BXT: branch-a
+CML: branch-b

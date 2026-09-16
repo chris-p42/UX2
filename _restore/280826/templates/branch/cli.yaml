@@ -1,0 +1,43 @@
+# templates/branch/cli.yaml
+#
+# BGP "neighbor <addr> fall-over bfd" is not exposed by the
+# sdwan_service_routing_bgp_feature parcel — verified 2026-08-07 directly
+# against nac-sdwan 1.4.0's vendored sdwan_features_service.tf: no
+# fall_over/fall-over attribute exists anywhere under bgp_features[] /
+# ipv4_neighbors[] / their nested address_families[] (only the
+# maximum-prefix policy_type knobs are there). Same result cross-checked
+# against sdwan_features_transport.tf's sdwan_transport_routing_bgp_feature
+# and the CiscoDevNet/sdwan v0.11.3 provider docs directly — the attribute
+# doesn't exist at any layer, not a modelling gap in this repo.
+#
+# Pushed as a CLI Add-On supplement to BGP-VPN10 (templates/branch/service.yaml
+# / service-b.yaml) instead of duplicating the whole `router bgp` stanza.
+# Re-entering `router bgp {{cli_bgp_as_number}}` with the same AS the parcel
+# already configures is additive on IOS-XE, not destructive — this only
+# adds the one line per neighbor the parcel can't express.
+#
+# Uses dedicated CLI variable names because vManage rejects a device
+# variable name duplicated between CLI and non-CLI FeatureProfiles. The
+# values remain next to the service BGP values in values/<site>.yaml.
+#
+# TODO: verify `address-family ipv4 vrf 10` is the correct on-device
+# stanza for VPN10 (vpn_id 10) BGP — not yet confirmed against a live BXT
+# running-config. If BXT's actual VRF-BGP rendering differs, fix this
+# before applying.
+#
+# SCHEMA-VALIDATED 2026-07-24 pattern against nac-sdwan 1.4.0
+# (sdwan_features_cli.tf): cli_profiles[].config.cli_configuration (string).
+
+sdwan:
+  feature_profiles:
+    cli_profiles:
+      - name: "CLI-__SITE__"
+        description: "CLI add-on - __SITE__ (BGP fall-over bfd supplement)"
+        config:
+          name: "CLI-CONFIG-__SITE__"
+          cli_configuration: |
+            router bgp {{cli_bgp_as}}
+             no address-family ipv6 vrf 10
+             address-family ipv4 vrf 10
+              neighbor {{cli_neighbor_corp}} fall-over bfd
+              neighbor {{cli_neighbor_infra}} fall-over bfd

@@ -1,0 +1,594 @@
+# claude-upd_020926.log
+# Modifications apportées le 2026-09-02 (session Claude Code)
+# Contexte: migration UX2 des data policies (classification QoS) + dédoublonnage
+#           des objets de policy, à partir de l'export vManage DATA/policies.json
+#
+# Sources UX1 utilisées (DATA/policies.json, LO_Central_Policy_V5, activée):
+#   data     BXS-BXT_QOSClass_V5  -> sites BXS(1403)/BXT(1405), VPN10, direction all
+#   data     LO_QOSClass_V3       -> TLV + LO_EU_SITES_PROD/AMER/ASIA, VPN10, all
+#   appRoute LO_AAR               -> site list ALL(1100-5000), VPN10, direction service
+#   qosMap   LO_QOSMAP (V1) / LO_QOSMAP_V2
+#   class    12 listes de classes (queue par classe)
+#   app      LO_Business_*_V2, LO_Teams_Video, Windows_File_tranfer
+#
+# Constat majeur: aucune définition hubAndSpoke n'existe dans l'export. Le projet
+# sites/fabric/ décrit dans DATA/claude_chat.md reposait sur une hypothèse fausse.
+# La TE réelle est faite par 2 control policies (NYC site 3200 / NYD site 3300),
+# hors périmètre du lab. Reste centralisé-only: cflowd + ces 2 control policies.
+#
+# Schéma: le module nac-sdwan 1.4.0 a été retrouvé dans
+#   backup_20260901_nac4/sites/bel/.terraform/modules/sdwan/
+# Toutes les clés ci-dessous sont désormais validées contre la source du module,
+# plus des suppositions.
+
+templates/_shared/policy-objects-common.yaml       | ADD | PO-__SITE__ + objets identiques fabric-wide: 7 forwarding classes (q0,2,3,4,5,6,7), 4 SLA classes, 9 application lists, 5 data prefix lists
+templates/_shared/application-priority-common.yaml | ADD | APP-PRIORITY-__SITE__ + 2 traffic policies: AAR-__SITE__ (6 seq, direction service) et QOSCLASS-__SITE__ (22 seq, direction all) = migration de la data policy
+templates/_shared/policy.yaml                      | MOD | SUPPRESSION du bloc feature_profiles.policy_object_profile (LO_BB_PFX SANS suffixe). Reliquat d'avant PPARC0012 (2026-08-19), rendu dans les 3 sites en doublon du LO_BB_PFX-__SITE__ correct -> le 2e apply aurait échoué. Ne reste que policy_groups PG-__SITE__ + en-tête expliquant à quoi sert ce fichier.
+templates/branch/policy-objects.yaml               | MOD | réduit au seul objet branch-specific: LO_BB_PFX-__SITE__ (le reste est passé dans _shared)
+templates/branch/application-priority.yaml         | MOD | réduit au seul scheduler QOS-__SITE__ (LO_QOSMAP_V2, 7 queues, 100%)
+templates/dc/policy-objects.yaml                   | MOD | réduit au seul objet DC-specific: LO_VIDEO-__SITE__ (queue 1)
+templates/dc/application-priority.yaml             | MOD | réduit au scheduler QOS-__SITE__ (LO_QOSMAP V1, 8 queues, 100%) + classes renommées (voir ci-dessous)
+templates/dc/*.yaml                                | MOD | noms d'objets "-BEL" -> "-__SITE__" (rendu identique, BEL est le seul site dc; nécessaire pour partager les fichiers _shared)
+globals.yaml                                       | MOD | ajout section qos_hosts.{tube_server_prefixes, scavenger_host_prefixes} (placeholders bloquants)
+variants.yaml                                      | MOD | ajout des 2 fichiers _shared/*-common.yaml à shared_templates; commentaires des fichiers par variante mis à jour
+known_object_names.yaml                            | MOD | +22 noms de séquences QOSCLASS, +7 application lists, +2 data prefix lists, +LO_QOSMAP; retrait de LO_DEFAULT/LO_STREAMING/LO_TRANSACTIONAL/LO_SCAVENGER (classes supprimées)
+generate.py                                        | MOD | erreur dure si deux templates de dossiers différents rendent le même basename dans data/ (collision silencieuse rencontrée pendant cette session)
+
+## Décisions de fond
+
+### 1. Classes du DC réconciliées (dédoublonnage demandé)
+UX1 nommait les queues du DC d'après le scheduler V1 (LO_DEFAULT q2, LO_STREAMING
+q3, LO_TRANSACTIONAL q4, LO_SCAVENGER q7) alors que la data policy LO_QOSClass_V3
+classait dans les MÊMES queues sous les noms V2 (LO_CONTROL, LO_REAL-TIME,
+LO_MULTIMEDIA, LO_BESTEFFORT) — deux noms par queue, ce que UX1 tolère puisque
+c'est la class list qui porte le numéro de queue.
+UX2 indexe le scheduler PAR forwarding class et en dérive la queue
+(sdwan_features_application_priority.tf) : garder les deux noms produirait deux
+entrées de scheduler sur la même queue. Un seul nom par queue est conservé, celui
+que la traffic policy positionne. Bandwidth V1 inchangée (10/20/10/15/15/15/10/5).
+LO_VIDEO (q1, 20%) reste déclaré côté DC uniquement : rien n'y classe, exactement
+comme en UX1, mais la queue et sa bande passante sont réelles.
+
+### 2. Deux traffic policies plutôt qu'une
+`direction` et `vpns` sont des attributs de la traffic policy, pas de la séquence.
+UX1 applique LO_AAR en direction `service` et les data policies en direction
+`all` — impossible de fusionner sans changer le comportement.
+A CONFIRMER au premier plan/apply : que vManage accepte DEUX parcels traffic
+policy dans un même profil Application Priority. Terraform les indexe
+"<profil>-<policy>" donc côté module c'est bon ; l'UI UX2 n'en montre
+normalement qu'une. Repli si refus : fusionner en une seule policy direction
+`all`, en acceptant que les séquences AAR s'appliquent aussi from-tunnel.
+
+### 3. Bloc ThousandEyes / GVA NON migré
+Tête des deux data policies UX1 (V5 séq 1/11/21, V3 séq 1..81) : épinglage du
+trafic de sonde sur une couleur TLOC locale via dix prefix lists de production
+(LO_THOUSANDEYES-INTS/SWB, LO_GVA_SDWAN_PUBLICS_COLT/SWISSCOM, LO-GVA-HORNET/
+RAPTOR/AVENGER/HELLCAT, LO-HKG-SIN-TOK_ESX, LO_LEMAN_...) décrivant l'infra
+GVA/HKG absente du lab BEL/BXT/CML. Les porter créerait ~10 objets placeholder
+vides par site pour des séquences qui ne peuvent jamais matcher.
+Le reste (le coeur de classification) est identique octet pour octet entre V5 et
+V3 et a été migré intégralement.
+
+### 4. Bug schéma corrigé au passage
+`application_lists[]` consomme `applications:` et non `entries:`
+(sdwan_policy_objects.tf:20 — try(each.value.applications, [])). LO_Teams_Video
+était écrit avec `entries:` depuis le 2026-09-01 : la liste aurait été créée VIDE
+en vManage, sans aucune erreur terraform, et la séquence AAR TEAMS_VIDEO n'aurait
+jamais matché.
+
+## TODO avant terraform plan
+
+globals.yaml — placeholders bloquants restants (generate.py --strict les liste) :
+  commvault.sin_server_prefixes / commvault.server_prefixes / backup.server_prefixes
+  qos_hosts.tube_server_prefixes / qos_hosts.scavenger_host_prefixes   <- nouveaux
+  + antérieurs : SNMP_USERNAME_1/2, SNMP_AUTH_PASSWORD, SNMP_PRIV_PASSWORD,
+    TACACS_ENCRYPTED_KEY, FABRIC_SECURITY, OSPF_MD5_KEY (bxt)
+Séquence BACKUP_TO_COMMVAULT : le match source (anonymisé <IPNETWORK> dans
+l'export) a été omis, la règle est donc légèrement plus large qu'en UX1.
+
+## Vérifications faites
+
+python generate.py            -> 3 sites, seuls les placeholders attendus (2 nouveaux)
+python validate_model.py      -> mêmes 6 échecs qu'AVANT la session (vpn512_desc
+                                 sur bel, cli_* non référencées sur bxt/cml),
+                                 aucun nouveau ; l'échec transitoire
+                                 "policy_object_profile ... declares None" est résolu
+merge manuel des data/*.yaml  -> BXT/CML: PO 7 classes + 4 SLA + 9 app + 5 dataPfx
+                                 + 1 pfx, QOS 7 queues 100%, AAR 6 seq + QOSCLASS
+                                 22 seq ; BEL: 8 classes/8 queues 100%, 0 pfx.
+                                 Références non résolues : AUCUNE, sur les 3 sites.
+diff sites/ avant/après       -> seuls policy.yaml, policy-objects.yaml,
+                                 application-priority.yaml modifiés + les 2
+                                 nouveaux fichiers *-common.yaml. Rien d'autre.
+
+## Hors scope (sessions futures)
+
+- sites/fabric/ : à recadrer. Contenu réel possible = cflowd (LO_CFlowd_Policy)
+  + control policies NYC/NYD + site/vpn lists classiques, avec terraform import
+  de LO_Central_Policy_V5. Aucun de ces objets ne concerne BEL/BXT/CML.
+- Configuration "rôle HUB" du site DC (bel) — demandé par l'utilisateur, non traité.
+- OSPF_TO_OMP_DNEY_DEFAULT, OMP_TO_BGP_2000_MED : inchangés, toujours différés.
+- Dérive constatée dans CLAUDE.md : les site_id y sont donnés comme
+  BEL=1100 / BXT=110 / CML=3 alors que values/ porte BEL=1, BXT=3, CML=5.
+
+# ===========================================================================
+# Ajout 2026-09-02 (2e partie de session) : rôle HUB de BEL — default en OMP
+# ===========================================================================
+
+templates/dc/service.yaml | MOD | lan_vpns[VPN10].ipv4_omp_advertise_routes: protocol ospf, networks 0.0.0.0/0.0.0.0
+
+## Le besoin
+
+Le hub annonce la default vers les spokes en OMP ; chaque spoke la ré-annonce
+côté LAN avec un MED supérieur (route-map OMP_TO_BGP_1000_MED). Chaîne complète :
+
+  core DC --OSPF--> BEL --OMP--> spoke --BGP MED 1000--> SDA border
+
+## Ce qui existait déjà (côté spoke) — vérifié, complet
+
+Les trois variantes branch (service.yaml, service-b.yaml, service-routed.yaml)
+portent déjà, dans bgp_features VPN10 :
+  ipv4_networks: 0.0.0.0/0.0.0.0
+  ipv4_neighbors[*].address_families[*].route_policy_out: OMP_TO_BGP_1000_MED
+  route_policies: OMP_TO_BGP_1000_MED (default_action reject, séquence SET_MED
+                  base_action accept, actions.metric 1000)
+Le `network 0.0.0.0` n'annonce que si la default est réellement dans la RIB
+VPN 10 — elle y arrive par OMP. Rien à changer côté spoke.
+
+## Ce qui manquait (côté hub) — ajouté
+
+BEL ne poussait rien dans OMP pour la default. Ajout dans dc/service.yaml,
+lan_vpns[VPN10] :
+
+  ipv4_omp_advertise_routes:
+    - protocol: ospf
+      networks:
+        - network_address: "0.0.0.0"
+          subnet_mask: "0.0.0.0"
+
+Schéma validé : sdwan_features_service.tf:396 (advertise_omp_ipv4s) —
+ipv4_omp_advertise_routes[] {protocol, route_policy, networks[]|aggregates[]},
+networks[] {network_address, subnet_mask, region}. `protocol` est passé
+verbatim au provider, sans valeur par défaut dans defaults.yaml.
+
+## Point technique important
+
+Cette entrée est NÉCESSAIRE même si le parcel OMP partagé
+(_shared/system.yaml) porte déjà `advertise_ipv4_ospf: true` : ce flag
+redistribue la RIB OSPF dans OMP, mais OMP ne transporte pas 0.0.0.0/0 par
+simple redistribution — la default doit être nommée explicitement.
+Sans ce bloc, le `network 0.0.0.0 0.0.0.0` des branches ne matche rien (la
+default est absente de leur RIB VPN 10), le SDA border n'apprend aucune
+default, et AUCUNE erreur n'apparaît nulle part pour l'expliquer.
+`networks:` restreint l'annonce à la seule default ; le reste de la RIB OSPF
+continue de passer par le flag advertise_ipv4_ospf, inchangé.
+
+## Décision : protocol = ospf (utilisateur, 2026-09-02)
+
+La default arrive sur BEL depuis le core DC via OSPF sur le LAG campus.
+Cohérent avec la correction de design du 2026-08-07 : le hub DC ne peere pas
+BGP côté LAN, OSPF uniquement. Aucune static route ni device variable à
+ajouter dans values/bel.yaml.
+Si BEL acquiert un jour sa propre `ip route vrf 10 0.0.0.0/0`, ajouter une
+DEUXIÈME entrée avec protocol: static plutôt que modifier celle-ci.
+
+## Vérifications
+
+python generate.py       -> rendu BEL conforme, aucun placeholder nouveau
+python validate_model.py -> mêmes 6 échecs préexistants, aucun nouveau
+
+# ===========================================================================
+# Ajout 2026-09-03 : AAR par site — values/aar/<site>.yaml
+# ===========================================================================
+
+values/aar/_README.md                              | ADD | doc du répertoire: pourquoi l'AAR est par site, tableau des couleurs par site, procédure d'ajout d'un site
+values/aar/{bxt,cml,bel}.yaml                      | ADD | AAR-__SITE__ par site (6 séquences), preferred_colors propres à chaque site
+templates/_shared/application-priority-common.yaml | MOD | RETRAIT du bloc AAR (il ne reste que QOSCLASS-__SITE__); en-tête réécrit
+generate.py                                        | MOD | AAR_VALUES = values/aar; rendu obligatoire de values/aar/<site>.yaml vers data/aar.yaml; erreur nommée si absent; garde sur le basename réservé aar.yaml; docstring
+CLAUDE.md                                          | MOD | nouvelle règle dure sur values/aar/
+
+## Pourquoi (décision utilisateur 2026-09-03)
+
+L'AAR est la seule partie du profil Application Priority dont les valeurs sont
+réellement propres au site : `preferred_colors` ne peut nommer que des couleurs
+que les transports du site portent effectivement.
+
+  Site  Variante           Couleurs présentes                    AAR preferred_colors
+  BXT   branch-a-routed    custom1 custom2 private1 private2     private1, private2
+  BEL   dc                 custom1 custom2 private1              private1
+  CML   branch-b-routed    custom1 custom2                       custom1, custom2
+
+UX1 mettait private1+private2 partout sans se soucier de l'existence réelle des
+couleurs (LO_AAR était UN objet appliqué à la site list ALL).
+
+CORRECTION 2026-09-04 — la première rédaction de ce log affirmait que nommer une
+couleur absente "devient fatal le jour où strict: true est posé". C'est FAUX.
+preferred_colors s'applique parmi les tunnels qui respectent DEJA la SLA ; si
+aucun survivant ne porte une couleur listée, n'importe quel survivant est utilisé
+— c'est un indice, pas un filtre. Une couleur absente est donc un no-op.
+`strict` est un levier SEPARE : il droppe le trafic quand AUCUN tunnel ne
+respecte la SLA, condition sans rapport avec la disponibilité des couleurs.
+La raison de tenir les listes justes par site est documentaire (lisibilité,
+détection de dérive), pas fonctionnelle.
+
+La séquence 6 (BACKUP_SERVERS) garde custom1/custom2 sur TOUS les sites : le
+trafic de backup est tenu hors du transport privé par design, elle ne suit donc
+pas les preferred_colors du site.
+
+## Mécanique
+
+- `values/aar/` est un SOUS-répertoire à dessein : `VALUES.glob("*.yaml")` n'est
+  pas récursif, donc ces fichiers ne sont pas pris pour des définitions de site
+  (ils n'ont aucune des 4 clés requises et feraient échouer le run).
+- Rendu par le MÊME pipeline que templates/ : `__SITE__` et `__GLOBAL:`
+  s'appliquent. Sortie dans sites/<site>/data/aar.yaml.
+- Les fichiers utilisent `__SITE__` et non le code littéral, bien qu'ils soient
+  déjà propres au site : copier un fichier pour onboarder un nouveau site est
+  ainsi sûr, là où un `AAR-BXT` littéral oublié dans values/aar/new.yaml
+  entrerait en collision avec le parcel de BXT (PPARC0012).
+- Fichier OBLIGATOIRE : generate.py sort en erreur nommée si absent. Un site sans
+  AAR ne serait détectable ni par terraform ni par vManage.
+- Garde ajouté : si un template rendait un jour vers data/aar.yaml, erreur dure
+  (nom réservé).
+
+## Ce qui reste partagé
+
+  QOSCLASS-<SITE>  classification QoS   _shared/application-priority-common.yaml   fabric-wide
+  QOS-<SITE>       scheduler            {dc,branch}/application-priority.yaml      par variante
+  AAR-<SITE>       app-aware routing    values/aar/<site>.yaml                     PAR SITE
+
+## Vérifications
+
+python generate.py            -> 3 sites, aucun placeholder nouveau
+python validate_model.py      -> mêmes 6 échecs préexistants, aucun nouveau
+merge manuel des data/*.yaml  -> les 3 sites ont bien les 2 traffic policies
+                                 (AAR-<SITE> + QOSCLASS-<SITE>) sur le profil
+                                 APP-PRIORITY-<SITE>; références non résolues:
+                                 AUCUNE sur les 3 sites
+test du garde-fou             -> values/aar/cml.yaml retiré => erreur nommée
+                                 "CML: missing app-aware routing file ...",
+                                 fichier restauré ensuite
+
+# ===========================================================================
+# Ajout 2026-09-04 : alignement de l'AAR sur LO_AAR (2 écarts comblés)
+# ===========================================================================
+
+values/aar/{bxt,bel,cml}.yaml | MOD | + fallback_to_best_path sur les séquences 4/5/6 ; + counter_name LO_COMMVAULT_Count sur 4/5
+values/aar/_README.md         | MOD | section décrivant les deux leviers
+
+## Ce qui manquait
+
+Relecture séquence par séquence de LO_AAR (DATA/policies.json) contre notre
+modèle. Les 9 séquences UX1 -> nos 6 (les 11/21/31/41, même SLA et même couleur,
+fusionnées en dscps: [34,32,24,18]). Deux attributs n'avaient pas été repris
+lors de la migration du 01/09 :
+
+  UX1 seq 61 / 71 / 81  ->  nos seq 4 / 5 / 6   fallbackToBestPath
+  UX1 seq 61 / 71       ->  nos seq 4 / 5       count = LO_COMMVAULT_Count
+
+## Ce qui a été ajouté
+
+  actions.sla_class.fallback_to_best_path: true   (seq 4, 5, 6)
+  actions.counter_name: "LO_COMMVAULT_Count"      (seq 4, 5)
+
+Clés validées contre le module : sdwan_features_application_priority.tf:156
+(fallback_to_best_path, dans le bloc sla_classes) et :167-168 (counter_name ->
+attribut `count`).
+
+fallback_to_best_path agit sur le cas "AUCUN tunnel ne respecte la SLA" : prendre
+le meilleur chemin disponible au lieu de laisser le comportement par défaut
+décider. C'est l'inverse de `strict`. Les séquences 1/2/3 ne l'ont
+délibérément PAS, conformément à UX1.
+
+counter_name n'est PAS un parcel : c'est un attribut interne à la traffic policy,
+donc pas de suffixe -__SITE__ ; chaque device tient son propre compteur sous ce
+même nom. Nom UX1 conservé verbatim.
+
+## Vérifications
+
+python generate.py       -> rendu conforme sur les 3 sites : fallback=True sur
+                            4/5/6, counter=LO_COMMVAULT_Count sur 4/5, rien sur
+                            1/2/3 ; aucun placeholder nouveau (LO_COMMVAULT_Count
+                            n'est pas capté par PLACEHOLDER_RE, casse mixte)
+python validate_model.py -> mêmes 6 échecs préexistants, aucun nouveau
+
+# ===========================================================================
+# Ajout 2026-09-04 : limite de 32 caracteres sur les noms de parcels
+# ===========================================================================
+
+templates/_shared/policy-objects-common.yaml       | MOD | 2 application lists renommees
+templates/_shared/application-priority-common.yaml | MOD | references QOSCLASS seq 6 et 10 suivies
+known_object_names.yaml                            | MOD | allowlist suivie
+validate_model.py                                  | MOD | check 7: longueur des noms de parcels
+CLAUDE.md                                          | MOD | regle dure
+
+## Symptome
+
+Apply depuis sites/bxt, 2 erreurs identiques:
+  sdwan_policy_object_application_list["LO_Business_Network_Control_V2-BXT"]
+  sdwan_policy_object_application_list["LO_Business_MM_Conferencing_V2-BXT"]
+  HTTP 400 SCHVALID0001
+  {"Validation Errors":{"Invalid Format Attributes":["name"]}}
+
+## Diagnostic
+
+vManage nomme le champ fautif (name) mais jamais la regle. La limite se deduit
+en comparant les echecs aux succes du meme apply:
+
+  34  ECHEC  LO_Business_Network_Control_V2-BXT
+  34  ECHEC  LO_Business_MM_Conferencing_V2-BXT
+  31  ok     LO_Business_Transac_Data_V2-BXT
+  31  ok     LO_Business_MM_Streaming_V2-BXT
+  <=28 ok    les 21 autres objets du site
+
+Jeu de caracteres identique dans les deux groupes (lettres, chiffres, _, -):
+elimine. La longueur est le seul discriminant. Limite bornee par les preuves a
+31 < limite <= 33; 32 est la valeur documentee par Cisco pour les parcels.
+
+## Correctif
+
+  LO_Business_Network_Control_V2 -> LO_Business_Net_Ctrl_V2   (30 -> 23)
+  LO_Business_MM_Conferencing_V2 -> LO_Business_MM_Conf_V2    (30 -> 22)
+
+Soit 27 et 26 caracteres avec le suffixe -BXT. Les 7 autres application lists
+sont inchangees: elles passaient deja et les renommer aurait provoque un
+destroy/create inutile dans le state.
+
+## Budget de nommage
+
+Le suffixe -<SITE> coute 1 + len(site_code), soit 4 aujourd'hui. Le nom de base
+ecrit dans templates/ dispose donc de 28 caracteres (27 si un code site a 4
+lettres apparait). Les deux noms restants a 31 caracteres
+(LO_Business_MM_Streaming_V2, LO_Business_Transac_Data_V2) passent aujourd'hui
+mais casseraient avec un code site plus long -> signales en WARNING par le
+nouveau check.
+
+## Garde-fou
+
+validate_model.py check 7: echec si un nom de parcel depasse 32 caracteres,
+avertissement au-dela de 31. Couvre le profil policy_object, les application
+lists, SLA classes, forwarding classes, prefix lists, qos_policies et
+traffic_policies. L'erreur vManage n'apparait qu'a l'APPLY, jamais au plan:
+sans ce check, on ne la decouvre qu'en poussant.
+
+## Verifications
+
+python generate.py       -> 3 sites, aucun placeholder nouveau
+python validate_model.py -> avant regeneration: le check 7 remontait bien les 6
+                            noms fautifs (2 par site). Apres: memes 6 echecs
+                            preexistants, aucun warning de longueur.
+
+# ===========================================================================
+# Ajout 2026-09-04 (2) : PPARC0008 - fusion des deux traffic policies
+# ===========================================================================
+
+values/aar/{bxt,bel,cml}.yaml                      | MOD | reecrits: TRAFFIC-__SITE__, 26 sequences, direction all
+templates/_shared/application-priority-common.yaml | MOD | QOSCLASS retire; ne reste que l'identite du profil
+templates/branch/transport-a.yaml                  | MOD | cles OSPF MD5 corrigees (voir plus bas)
+values/cml.yaml                                    | MOD | + cli_corp_ifname / cli_infra_ifname
+known_object_names.yaml                            | MOD | + VIDEO_DSCP_CS4, retrait de VIDEO_DSCP / TEAMS_VIDEO
+validate_model.py                                  | MOD | scan des {{var}} CLI + check 8 (cles inconnues)
+CLAUDE.md                                          | MOD | regles mises a jour
+
+## Erreur A - device variables refusees
+
+  PUT device variables, SCHVALID0001
+  "Not Defined In Schema Attributes":["dhcp_dns_server","vpn0_ospf_md5_key"]
+
+vManage n'accepte que les variables qu'un parcel a effectivement declarees.
+
+vpn0_ospf_md5_key: le template ecrivait un bloc invente
+  message_digest_keys: [{id, algorithm, key_variable}]
+que le module ne lit pas. Il consomme des cles PLATES sur l'interface
+(sdwan_features_transport.tf:731-734):
+  authentication_type / authentication_message_digest_key_id /
+  authentication_message_digest_key_variable
+Le bloc etait donc avale par try(), aucune variable declaree, alors que
+site-values.yaml continuait d'expedier la variable. Corrige.
+
+dhcp_dns_server: absente de ce depot. Le DNS DHCP est passe en constante le
+2026-09-01 (__GLOBAL:dhcp.dns_servers__). C'est un reliquat dans le
+values/bxt.yaml du jump host, a supprimer.
+
+## Erreur B - PPARC0008
+
+  Multiple traffic policies cannot be added for same vpn and same direction:
+  { 10,all } for traffic policy QOSCLASS-BXT and AAR-BXT
+
+Reponse au TODO ouvert depuis le 2026-09-02: vManage accepte plusieurs traffic
+policies dans un profil, mais pas deux qui se recouvrent sur (VPN, direction),
+et `all` englobe `service`.
+
+Fusion en une seule policy TRAFFIC-__SITE__, direction all, 26 sequences.
+Reproduction stricte d'UX1 demandee par l'utilisateur: chaque sequence porte
+l'UNION des actions que les deux policies UX1 auraient appliquees.
+13 des 26 sequences portent un sla_class.
+
+Sequences ajoutees par rapport a la simple concatenation:
+  - COMMVAULT_SIN_TO_SERVERS separee de BACKUP_TO_COMMVAULT (l'AAR matche
+    source+destination, la data policy la destination seule)
+  - VIDEO_DSCP_CS4 (DSCP 32): porte par LO_AAR seul
+  - COMMVAULT_SERVERS_TO_SIN et BACKUP_SERVERS: portes par LO_AAR seul
+Ces trois dernieres recoivent LO_BESTEFFORT, la classe que le defaut UX1 leur
+aurait donnee.
+
+TEAMS_VIDEO supprimee: LO_Teams_Video est un sous-ensemble de
+LO_Business_MM_Conferencing_V2, qui matche avant et donne le meme SLA. L'objet
+LO_Teams_Video-<SITE> reste declare mais n'est plus reference.
+
+LIMITE documentee: DSCP 32 (voir values/aar/_README.md).
+CONTRADICTION heritee: COMMVAULT_SIN_TO_SERVERS porte local_tloc custom2/custom1
+ET preferred_colors private (BXT/BEL). Les deux etaient poses en UX1.
+
+## Consequence de nommage
+
+Le parcel s'appelle desormais TRAFFIC-<SITE> et non AAR-<SITE>. AAR-BXT existe
+deja en vManage (creee au premier apply), donc terraform fera un
+destroy + create. Sans risque: policy_group_deploy est a false, rien n'est
+pousse sur les equipements.
+
+## Angles morts corriges dans validate_model.py
+
+Faux positifs: collect_variables ne lisait que <champ>_variable:, jamais les
+{{var}} des add-ons CLI. Les 5 cli_* signalees comme non referencees sur BXT et
+CML depuis des semaines etaient fausses.
+
+Effet de bord: le correctif a revele un VRAI manque - cli_corp_ifname et
+cli_infra_ifname absentes de values/cml.yaml alors que cli.yaml les reference.
+CML aurait echoue comme BXT. Ajoutees (valeurs BXT, a remplacer).
+
+Faux negatif: vpn0_ospf_md5_key etait vue comme referencee parce qu'un
+key_variable: trainait dans le YAML, sans que le module ne le lise. D'ou le
+check 8: toute cle presente dans sites/*/data/ mais absente de la source du
+module est signalee. Tourne si .terraform/modules/sdwan existe (donc apres
+terraform init), se signale comme saute sinon. Teste en reinjectant la cle
+fautive: remonte bien message_digest_keys et algorithm.
+
+Echecs validate_model: 6 -> 2 (il ne reste que vpn512_desc sur les 2 routeurs
+BEL, meme classe de probleme, a traiter avant de toucher a BEL).
+
+## Verifications
+
+python generate.py       -> 3 sites, aucun placeholder nouveau
+python validate_model.py -> 2 echecs preexistants, aucun warning de longueur
+merge manuel             -> 1 seule traffic policy par site (TRAFFIC-<SITE>,
+                            direction all, VPN 10, 26 sequences, 13 avec SLA);
+                            references non resolues: AUCUNE sur les 3 sites
+
+# ===========================================================================
+# Ajout 2026-09-04 (3) : Duplicate object key sur BEL
+# ===========================================================================
+
+templates/dc/application-priority.yaml | MOD | retrait de `description` au niveau profil
+validate_model.py                      | MOD | check 9 (scalaires contradictoires entre fichiers)
+CLAUDE.md                              | MOD | condition ajoutee a la regle SPLIT ACROSS FILES
+
+## Symptome (plan, pas apply)
+
+  Duplicate object key ... sdwan_feature_profiles.tf:8
+  Two different items produced the key "APP-PRIORITY-BEL"
+  (idem sdwan_policy_groups.tf:45)
+
+Uniquement sur BEL; les deux branches passaient.
+
+## Diagnostic
+
+Trois fichiers contribuent au profil APP-PRIORITY-<SITE>:
+  aar.yaml                          {name, traffic_policies}
+  application-priority-common.yaml  {name, description}
+  application-priority.yaml         {name, qos_policies} + description sur DC
+
+Le merge a produit DEUX items, ni un ni trois: donc deux ont fusionne et un est
+reste a part. Comparaison BEL / BXT: la seule difference structurelle est que
+`description` etait declaree DEUX FOIS avec des valeurs DIFFERENTES sur BEL
+('... - BEL' dans _shared, '... - BEL (DC hub)' dans dc/), alors que le fichier
+de variante branch n'en declare aucune.
+
+Conclusion: les items de liste fusionnent par `name` tant que leurs scalaires ne
+se contredisent pas. Un scalaire en conflit les laisse separes, et le for_each
+du module bute sur le nom duplique. Le compte de 2 correspond exactement.
+
+## Correctif
+
+`description` retiree de templates/dc/application-priority.yaml. Le profil DC
+prend donc celle de _shared ('Application priority profile - BEL').
+
+REGLE: quand un profil est reparti sur plusieurs fichiers, UN SEUL declare ses
+scalaires (name + description); les autres n'apportent que des listes.
+
+## Garde-fou
+
+validate_model.py check 9: pour chaque item nomme d'une liste de profils
+(system/transport/service/cli/application_priority/policy_groups), tout
+scalaire ayant plus d'une valeur entre les fichiers d'un site est une ERREUR,
+avec le detail des valeurs et des fichiers en cause.
+Teste en reintroduisant la description en double: detecte. Retiree: 0 conflit.
+
+Cette erreur se produit au PLAN, pas a l'apply - mais elle est invisible tant
+qu'on ne planifie pas le site concerne, d'ou l'interet du check.
+
+# ===========================================================================
+# Ajout 2026-09-04 (4) : ompProtocol refuse sur BEL
+# ===========================================================================
+
+templates/dc/service.yaml | MOD | ipv4_omp_advertise_routes: protocol ospf -> network
+CLAUDE.md                 | MOD | regle mise a jour
+
+## Symptome
+
+  sdwan_service_lan_vpn_feature["SVC-BEL-VPN10"], PUT
+  HTTP 400 SCHVALID0001
+  {"Validation Errors":{"Invalid Format Attributes":
+   ["data.ompAdvertiseIp4[0].ompProtocol"]}}
+
+## Diagnostic
+
+`ospf` EST une valeur valide cote provider: la doc de
+CiscoDevNet/terraform-provider-sdwan (docs/resources/service_lan_vpn_feature.md)
+donne pour advertise_omp_ipv4s[].protocol les choix bgp, ospf, ospfv3,
+connected, static, network, aggregate, eigrp, lisp, isis. Le plan est donc passe
+sans rien dire; c'est vManage qui refuse.
+
+Ce qui est refuse est la COMBINAISON. Le parcel a deux formes:
+  - redistribuer une RIB source entiere: ompProtocol = bgp/ospf/connected/
+    static/... SANS liste de prefixes
+  - annoncer des prefixes NOMMES: ompProtocol = network ou aggregate AVEC une
+    liste de prefixes
+On envoyait une liste de prefixes (0.0.0.0/0) avec ompProtocol = ospf: aucune
+des deux formes. vManage designe le discriminant, ompProtocol.
+
+LECON GENERALE: valide cote provider != valide cote vManage. L'enumeration du
+provider est l'union de ce que le champ peut porter selon la forme; vManage
+impose la forme. Ni le plan ni le check 8 ne peuvent attraper ca.
+
+## Correctif
+
+protocol: network (au lieu de ospf), meme liste de prefixes.
+
+Effet de bord favorable: l'annonce devient independante de l'origine de la
+default. Elle annonce 0.0.0.0/0 des qu'elle est dans la RIB VPN 10, que ce soit
+OSPF, une static ou autre. La decision du 2026-09-02 (la default arrive du core
+DC en OSPF) reste satisfaite, et le modele survit a BEL acquerant sa propre
+static default - ce que la forme `ospf` n'aurait pas permis.
+
+## Non outille
+
+Pas de check ajoute: la regle (protocol network/aggregate <=> liste de
+prefixes) est une hypothese deduite d'un seul refus, pas une contrainte
+confirmee. A transformer en check une fois l'apply passe.
+
+# ===========================================================================
+# Ajout 2026-09-04 (5) : les 3 sites appliques + UX2_PROJECT.md
+# ===========================================================================
+
+UX2_PROJECT.md | ADD | suivi du projet: etat, points ouverts, acquis, methode
+CLAUDE.md      | MOD | pointeur vers UX2_PROJECT.md en tete des "Known open items"
+
+## Confirme par l'utilisateur
+
+BXT, CML et BEL: terraform apply complet, les trois sites existent en vManage.
+CML est la premiere mise en oeuvre reelle de branch-b-routed, BEL de dc.
+
+RIEN n'est pousse sur les equipements: configuration_group_deploy et
+policy_group_deploy restent a false sur les 6 routeurs.
+
+## Points fermes par ricochet
+
+La regle d'unicite tenant-wide des noms de parcels NE s'applique PAS a tous les
+types: CML a cree SYS-CML avec ses parcels global/omp alors que BXT portait deja
+les memes noms. Le suffixe -<SITE> reste requis pour les policy objects
+uniquement (PPARC0012). C'etait la question ouverte depuis le 2026-08-19; le
+test propose a l'epoque etait exactement l'apply de CML. A confirmer d'un coup
+d'oeil en vManage.
+
+Acceptes par vManage, donc fermes cote schema (le rendu sur equipement reste a
+verifier au deploiement):
+  - route_policies[] base_action / default_action
+  - qos_policies[].target_interfaces laisse vide
+  - ipv4_omp_advertise_routes avec protocol: network
+
+## Reste ouvert
+
+Voir UX2_PROJECT.md. Prochaine etape: renseigner les placeholders (section 1)
+puis basculer les deploy gates sur un site pilote et comparer la running-config
+a DATA/valid_conf.

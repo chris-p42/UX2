@@ -1,0 +1,229 @@
+# templates/branch/transport-a.yaml
+#
+# Branch variant WITH MPLS TLOC-EXT (4 TLOCs total: custom1 + custom2
+# Internet, plus private1/private2 shared across the router pair via TLOC
+# extension).  Modelled from the UX1 export of
+# LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0 (site BXT).
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0
+# (sdwan_features_transport.tf) — see SCHEMA-VALIDATION.md.  Conventions:
+#   - Each interface entry needs a STATIC `name:` (used as the feature name
+#     and Terraform for_each key — never rename post-deploy) plus
+#     `interface_name(_variable)` for the actual port, which may be
+#     per-device.
+#   - `<field>_variable: <var>` declares a UX2 config-group device variable;
+#     per-router values come from values/<site>.yaml device_variables.
+#     ALL IPv4 settings (address AND mask) are device variables — no static
+#     IP values anywhere in this template.
+#   - Ethernet address variables require `ipv4_address_type: static`; without
+#     it the provider omits the variable from the configuration-group schema.
+#   - Default route is network_address+subnet_mask 0.0.0.0/0.0.0.0 with one
+#     next-hop per upstream.
+#   - Tunnel encapsulation: `ipsec_encapsulation: true` +
+#     `ipsec_preference(_variable)`.
+#   - `description` is the FEATURE (parcel) description; the CLI
+#     `description` line on the port is the separate
+#     `interface_description_variable` field — wired 2026-07-29 as a
+#     DEVICE VARIABLE on every interface (user decision: descriptions are
+#     always per-router data, never fixed in the template).  The strings
+#     live in values/<site>.yaml (*_desc variables, seeded from the UX1
+#     export).
+#
+# KNOWN vManage LIMITATION (validated live 2026-07-29 on BXT):
+# `bandwidth_downstream` / `shaping_rate` are stored in the parcel and
+# accepted by vManage, but 20.13 UX2 config-group rendering NEVER emits
+# the corresponding `bandwidth-downstream` / `shaping-rate` lines into
+# cEdge CLI — tested with both device-variable AND constant values (UX1
+# device templates did render them; the commands are qualified IOS-XE
+# CLI).  The values are kept here anyway: they are harmless parcel
+# metadata and the fields should start rendering when Cisco fixes the
+# template.  If the on-device config is needed sooner, push the lines via
+# a CLI add-on profile (see templates/dc/cli.yaml for the pattern) or
+# raise with TAC referencing the UX2 config-group rendering gaps.
+#
+# TLOC-EXT topology (from the live export — GE0/0/3 is the dedicated
+# inter-router cross-connect, NOT a WAN port):
+#   parent  — physical GE0/0/3, no IP, carries the two dot1q sub-interfaces
+#   relay   — sub-if that RELAYS this router's MPLS circuit to its peer
+#             (tloc_extension names the local physical MPLS port)
+#   tunnel  — sub-if that PRESENTS the peer's MPLS color to the fabric as
+#             this router's own TLOC (private2 on r1, private1 on r2 — the
+#             color is a device variable, so one template serves both)
+
+sdwan:
+  feature_profiles:
+    transport_profiles:
+      - name: "TRANS-__SITE__"
+        description: "Transport profile - __SITE__ (with MPLS TLOC-EXT)"
+
+        # VPN 0 — transport VPN (implicitly VPN 0; no vpn_id field exists)
+        wan_vpn:
+          # Transport-side resolvers (per-device vars, 8.8.8.8/8.8.4.4 today)
+          ipv4_primary_dns_address_variable: vpn0_dns_primary
+          ipv4_secondary_dns_address_variable: vpn0_dns_secondary
+
+          # One 0/0 with a next-hop per upstream (UX1 modelled these as four
+          # separate route entries with the same prefix)
+          ipv4_static_routes:
+            - network_address: "0.0.0.0"
+              subnet_mask: "0.0.0.0"
+              next_hops:
+                - address_variable: vpn0_gw_inet1   # Internet 1 gateway
+                - address_variable: vpn0_gw_inet2   # Internet 2 gateway
+                - address_variable: vpn0_gw_mpls1   # MPLS 1 (local or via relay)
+                - address_variable: vpn0_gw_mpls2   # MPLS 2 (local or via relay)
+
+          # VPN 0 OSPF toward the MPLS PE / across the TLOC-EXT
+          # cross-connect — by-name reference to ospf_features below
+          ospf: "OSPF-VPN0"
+
+          ethernet_interfaces:
+
+            # --- Internet 1 (color custom1) ---
+            - name: "INET1"
+              description: "Internet 1 uplink"
+              interface_description_variable: vpn0_inet1_desc   # CLI port description
+              interface_name_variable: vpn0_inet1_ifname
+              shutdown_variable: vpn0_inet1_shutdown   # true until ISP live
+              ipv4_address_type: static
+              ipv4_address_variable: vpn0_inet1_ip
+              ipv4_subnet_mask_variable: vpn0_inet1_mask
+              bandwidth_downstream_variable: vpn0_inet1_bw_down
+              shaping_rate_variable: vpn0_inet1_shape
+              # DIA NAT (requirement 2026-07-29): per-router on/off via the
+              # vpn0_inet1_nat device variable ('true'/'false' in values/);
+              # type `interface` = overload on the WAN address.
+              ipv4_nat: true
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_inet1_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_inet1_pref   # 200 r1 / 100 r2
+                # Canonical allow-service keys (2026-07-29): NaC 1.4.0 only
+                # consumes flat `allow_service_<svc>` under tunnel_interface —
+                # the earlier `allow_services:`/`allowed_protocols:` maps were
+                # silently ignored.  Toggle here (or switch to the
+                # `allow_service_*_variable` form for per-router control).
+                allow_service_https: false
+                allow_service_ospf: false    # no OSPF on internet colors
+
+            # --- Internet 2 (color custom2) ---
+            - name: "INET2"
+              description: "Internet 2 uplink"
+              interface_description_variable: vpn0_inet2_desc   # CLI port description
+              interface_name_variable: vpn0_inet2_ifname
+              shutdown_variable: vpn0_inet2_shutdown
+              ipv4_address_type: static
+              ipv4_address_variable: vpn0_inet2_ip
+              ipv4_subnet_mask_variable: vpn0_inet2_mask
+              bandwidth_downstream_variable: vpn0_inet2_bw_down
+              shaping_rate_variable: vpn0_inet2_shape
+              # DIA NAT — see INET1 note
+              ipv4_nat: true
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_inet2_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_inet2_pref
+                allow_service_https: false
+                allow_service_ospf: false
+
+            # --- MPLS physical port (color private1 on r1 / private2 on r2;
+            #     shut on the router whose circuit arrives via the peer) ---
+            - name: "MPLS"
+              description: "MPLS uplink"
+              # Per-router CLI description (UX1: "private1 TO CAL" r1 /
+              # "private2 TO BXS" r2 — names the far-end site)
+              interface_description_variable: vpn0_mpls_desc
+              interface_name_variable: vpn0_mpls_ifname
+              shutdown_variable: vpn0_mpls_shutdown
+              ipv4_address_type: static
+              ipv4_address_variable: vpn0_mpls_ip
+              ipv4_subnet_mask_variable: vpn0_mpls_mask
+              bandwidth_downstream_variable: vpn0_mpls_bw_down
+              shaping_rate_variable: vpn0_mpls_shape
+              # NAT toggle also on the MPLS uplink (added 2026-07-29, synced
+              # from live-lab change) — same per-router on/off pattern as
+              # INET1/2.
+              ipv4_nat: true
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_mpls_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_mpls_pref
+                allow_service_https: false
+                # OSPF-VPN0 (below) runs its PE adjacency on this port; with
+                # a tunnel-interface present, control-plane traffic is
+                # filtered by allow-service — ospf MUST stay allowed here.
+                allow_service_ospf: true
+
+
+            # --- TLOC-EXT parent: physical cross-connect, no IP, no tunnel ---
+            - name: "TLOC-EXT-PARENT"
+              description: "Private PARENT TLOC-EXT (inter-router x-connect)"
+              interface_description_variable: tloc_ext_parent_desc   # CLI port description
+              interface_name_variable: tloc_ext_parent_ifname
+              shutdown_variable: tloc_ext_parent_shutdown
+
+            # --- TLOC-EXT relay sub-if: hands the LOCAL MPLS circuit to the
+            #     peer.  tloc_extension names the local physical MPLS port
+            #     being extended. ---
+            - name: "TLOC-EXT-RELAY"
+              description: "TLOC-EXT relay for peer router"
+              # Per-router CLI description (names the peer it relays for)
+              interface_description_variable: tloc_ext_relay_desc
+              interface_name_variable: tloc_ext_relay_ifname
+              shutdown_variable: tloc_ext_relay_shutdown
+              ipv4_address_type: static
+              ipv4_address_variable: tloc_ext_relay_ip
+              ipv4_subnet_mask_variable: tloc_ext_relay_mask
+              tloc_extension_variable: tloc_ext_relay_parent
+
+            # --- TLOC-EXT tunnel sub-if: brings the PEER's MPLS color up as
+            #     a TLOC on this router ---
+            - name: "TLOC-EXT-TUNNEL"
+              description: "TLOC-EXT tunnel via peer router"
+              # Per-router CLI description (names the color + peer path)
+              interface_description_variable: tloc_ext_tunnel_desc
+              interface_name_variable: tloc_ext_tunnel_ifname
+              shutdown_variable: tloc_ext_tunnel_shutdown
+              ipv4_address_type: static
+              ipv4_address_variable: tloc_ext_tunnel_ip
+              ipv4_subnet_mask_variable: tloc_ext_tunnel_mask
+              bandwidth_downstream_variable: tloc_ext_tunnel_bw_down
+              shaping_rate_variable: tloc_ext_tunnel_shape
+              tunnel_interface:
+                color_variable: tloc_ext_tunnel_color  # private2 r1 / private1 r2
+                ipsec_encapsulation: true
+                ipsec_preference_variable: tloc_ext_tunnel_pref
+                allow_service_https: false
+                # On router1 this sub-if (.992, vpn0_ospf_tloc_if) carries an
+                # OSPF adjacency across the TLOC-EXT cross-connect — keep
+                # ospf allowed through the tunnel-interface filter.  (On
+                # router2 the OSPF-side .992 is the RELAY sub-if, which has
+                # no tunnel_interface and therefore no filtering.)
+                allow_service_ospf: true
+
+        # VPN 0 OSPF feature (referenced by wan_vpn.ospf above).
+        # Area 172 comes from the UX1 export path /0//router/ospf/area/172/.
+        # Timers / reference bandwidth are FABRIC-GLOBAL (identical on every
+        # site, requirement 2026-07-29) — sourced from globals.yaml `ospf:`
+        # via __GLOBAL: tokens; change them there, never per-site here.
+        ospf_features:
+          - name: "OSPF-VPN0"
+            router_id_variable: vpn0_ospf_router_id
+            reference_bandwidth: "__GLOBAL:ospf.reference_bandwidth__"
+            spf_calculation_delay: "__GLOBAL:ospf.spf_calculation_delay__"
+            spf_initial_hold_time: "__GLOBAL:ospf.spf_initial_hold_time__"
+            spf_maximum_hold_time: "__GLOBAL:ospf.spf_maximum_hold_time__"
+            areas:
+              - number: 172
+                interfaces:
+                  - name_variable: vpn0_ospf_private_if   # MPLS-facing
+                    hello_interval: "__GLOBAL:ospf.interface.hello_interval__"
+                    dead_interval: "__GLOBAL:ospf.interface.dead_interval__"
+                    lsa_retransmit_interval: "__GLOBAL:ospf.interface.lsa_retransmit_interval__"
+                  - name_variable: vpn0_ospf_tloc_if      # TLOC-EXT-facing
+                    hello_interval: "__GLOBAL:ospf.interface.hello_interval__"
+                    dead_interval: "__GLOBAL:ospf.interface.dead_interval__"
+                    lsa_retransmit_interval: "__GLOBAL:ospf.interface.lsa_retransmit_interval__"

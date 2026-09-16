@@ -9,7 +9,7 @@ The file name must match the `site_code` of `values/<site>.yaml`, lowercased —
 `values/bxt.yaml` pairs with `values/aar/bxt.yaml`.
 
 > The directory name is now a misnomer (it holds more than app-aware routing).
-> Renaming it touches `generate.py`, `AGENTS.md` and `README.md`; left as a
+> Renaming it touches `generate.py`, `CLAUDE.md` and `README.md`; left as a
 > deliberate follow-up.
 
 ## Why ONE policy and not two

@@ -16,8 +16,8 @@
 # templates/branch/service.yaml (lan_vpns list, named ospf feature
 # referenced from the VPN, `<field>_variable:` for per-device values).
 #
-# 2026-07-29 — brought in line with the fixes proven on BXT (live-validated
-# 2026-07-29):
+# 2026-07-29 — brought in line with the fixes proven on BXT (see
+# SCHEMA-VALIDATION.md "Live config-group validation findings"):
 #   - Loopback10 sets `ipv4_address_type: static` (required by the provider
 #     when ipv4_address_variable is used).
 #
