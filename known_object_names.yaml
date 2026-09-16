@@ -98,11 +98,7 @@ names:
   - LO_Business_MM_Streaming_V2
   - LO_Business_Transac_Data_V2
 
-  # ── Centralized policy site list names ───────────────────────────────────
-  - ALL_SD_WAN_SITES                       # site list (templates/fabric/cflowd.yaml)
-
   # ── Description string tokens ─────────────────────────────────────────────
-  - FABRIC_SECURITY                        # system profile description (system.yaml)
   - LO_QOSMAP                             # appears in description fields (DC V1)
   - LO_QOSMAP_V2                          # appears in description fields
   - LO_AAR                                # appears in description fields

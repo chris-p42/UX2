@@ -1,0 +1,27 @@
+# known_object_names.yaml
+#
+# Allowlist of deliberate ALL_CAPS_UNDERSCORE identifiers in the generated
+# output that are NOT unfilled placeholders.  generate.py's scan_placeholders()
+# loads this list and skips any token found here.
+#
+# WHY THIS EXISTS — generate.py flags every ALL_CAPS_UNDERSCORE token as a
+# potentially forgotten placeholder (e.g. TACACS_ENCRYPTED_KEY, CHASSIS_ID_R1).
+# SD-WAN operational naming convention uses the same style for real object names
+# (route-maps, prefix-lists, sequence names) that are rendered verbatim into the
+# device running-config.  Without this allowlist every run would report them as
+# warnings, and --strict would abort.
+#
+# KEEP THIS A CLOSED LIST — never replace with a regex.  The whole point of the
+# scan is that an unexpected ALL_CAPS token is reported.  A typo'd object name
+# (e.g. OMP_TO_BGP_1OOO_MED with a letter O instead of zero) must still trip
+# the warning.  Adding an object to any template means adding its name here.
+#
+# The -__SITE__ suffix (e.g. LO_BB_PFX-BXT) needs no entry of its own:
+# PLACEHOLDER_RE stops at the hyphen, so only the base name is matched.
+
+names:
+  - LO_BB_PFX                             # ipv4 prefix-list (policy-objects.yaml)
+  - OMP_TO_BGP_1000_MED                   # route-map (service*.yaml)
+  - OMP_TO_BGP_1000_MED_ASPATH_PREPEND_BB # route-map (service*.yaml)
+  - SET_MED                               # route-map sequence name
+  - PREPEND_BB                            # route-map sequence name

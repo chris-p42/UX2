@@ -1,0 +1,48 @@
+# templates/branch/aaa_tacacs.yaml
+#
+# AAA parcel for ALL branch sites (branch-a and branch-b) — merged onto the
+# SYS-__SITE__ profile from _shared/system.yaml by the module's YAML merge
+# (list items merge by `name`; verified against netascode/utils 1.0.2).
+#
+# Source: UX1 feature template LO_BR_AAA_ISE
+#   (templateId a60260f8-af8a-4898-9211-26a450856ef5)
+#   server-auth-order: "tacacs-10,local"
+#
+# SCHEMA-VALIDATED 2026-07-24 (sdwan_features_system.tf):
+#   - TACACS nests INSIDE the aaa parcel as aaa.tacacs_groups[] — there is
+#     no standalone server-group object.
+#   - The GROUP NAME IS AUTO-DERIVED by the module: "tacacs-<vpn>", so
+#     vpn 10 yields "tacacs-10" — exactly the live fabric's group name.
+#     Do not add a `name:` field; it does not exist.
+#   - auth_order entries reference groups BY NAME, hence "tacacs-10" here
+#     (variant-specific) rather than a generic "tacacs" keyword — this is
+#     why the aaa parcel lives per-variant and not in globals.yaml.
+#   - Server key field is `key` (AES type-6 encrypted string), not
+#     `encrypted_key`.  There is no `auth_fallback` knob; local fallback is
+#     expressed by putting "local" last in auth_order (as UX1 did).
+
+sdwan:
+  feature_profiles:
+    system_profiles:
+      - name: "SYS-__SITE__"
+        aaa:
+          # TACACS first, local fallback — mirrors UX1 "tacacs-10,local"
+          auth_order:
+            - "tacacs-10"
+            - "local"
+
+          tacacs_groups:
+            # VPN 10 = branch service VPN; Loopback10 = stable per-router
+            # source so interface flaps don't break authentication.
+            # Module derives group name "tacacs-10" from vpn below.
+            - vpn: 10
+              source_interface: "Loopback10"
+              servers:
+                - address: "10.253.241.173"   # primary — fill in real IP/FQDN
+                  key: "TACACS_ENCRYPTED_KEY"  # AES type-6; fill in real value
+                  port: 49
+                  timeout: 5                   # seconds before next server
+                - address: "10.253.241.174"   # secondary — fill in real IP/FQDN
+                  key: "TACACS_ENCRYPTED_KEY"
+                  port: 49
+                  timeout: 5

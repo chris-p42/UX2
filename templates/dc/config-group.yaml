@@ -10,7 +10,7 @@
 sdwan:
   configuration_groups:
     - name: "CG-__SITE__"
-      description: "Config group - __SITE__ (DC hub)"
+      description: "Config group - BEL (DC hub)"
       system_profile: "SYS-__SITE__"
       transport_profile: "TRANS-__SITE__"
       service_profile: "SVC-__SITE__"

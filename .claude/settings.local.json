@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell($s = Get-Content sites\\\\bxt\\\\terraform.tfstate -Raw | ConvertFrom-Json; Write-Output \\(\"tf version: \" + $s.terraform_version + \"  serial: \" + $s.serial\\); $s.resources | ForEach-Object { \"{0} {1}.{2} \\({3} inst\\)\" -f $_.mode, $_.type, $_.name, $_.instances.Count } | Sort-Object | Select-Object -First 60)",
+      "PowerShell($s = Get-Content sites\\\\bxt\\\\terraform.tfstate -Raw | ConvertFrom-Json; $cg = \\($s.resources | Where-Object { $_.type -eq 'sdwan_configuration_group' }\\).instances[0].attributes; Write-Output \\(\"devices: \" + \\($cg.devices | ConvertTo-Json -Depth 5\\)\\))",
+      "PowerShell(python generate.py)",
+      "PowerShell(python validate_model.py)",
+      "PowerShell(Select-String -Path sites\\\\bel\\\\.terraform\\\\modules\\\\sdwan\\\\sdwan_features_system.tf -Pattern 'system_security_feature|each.value.security' -Context 0,0 | Select-Object -First 5 | ForEach-Object { \"$\\($_.LineNumber\\): $\\($_.Line\\)\" })",
+      "WebFetch(domain:netascode.cisco.com)",
+      "PowerShell($s = Get-Content sites\\\\bxt\\\\terraform.tfstate -Raw | ConvertFrom-Json; $sec = \\($s.resources | Where-Object { $_.type -eq 'sdwan_system_security_feature' }\\).instances[0].attributes; $sec.PSObject.Properties | Where-Object { $null -ne $_.Value } | ForEach-Object { \"$\\($_.Name\\) = $\\($_.Value\\)\" }; Write-Output '--- OMP ---'; $omp = \\($s.resources | Where-Object { $_.type -eq 'sdwan_system_omp_feature' }\\).instances[0].attributes; $omp.PSObject.Properties | Where-Object { $null -ne $_.Value } | ForEach-Object { \"$\\($_.Name\\) = $\\($_.Value\\)\" })",
+      "PowerShell(python generate.py 2>&1 | Select-Object -First 3; python validate_model.py; Select-String -Path sites\\\\bxt\\\\data\\\\system.yaml -Pattern 'integrity|rekey|anti_replay' | ForEach-Object { $_.Line.Trim\\(\\) })",
+      "WebSearch",
+      "PowerShell(python generate.py 2>&1 | Select-Object -First 3; python validate_model.py; Get-Date -Format 'yyyy-MM-dd HH:mm')",
+      "PowerShell(python generate.py 2>&1 | Select-String 'Generated|SNMP'; python validate_model.py; Select-String -Path sites\\\\bxt\\\\data\\\\system.yaml -Pattern 'views:|groups:|users:|snmp' -Context 0,2 | Select-Object -First 6 | ForEach-Object { $_.Line.Trim\\(\\) }; Get-Date -Format 'yyyy-MM-dd HH:mm')",
+      "PowerShell(python generate.py --site bxt 2>&1 | Select-Object -First 2; python validate_model.py; Get-Date -Format 'yyyy-MM-dd HH:mm')",
+      "PowerShell($j = Get-Content ..\\\\nac4_bkp\\\\UX1\\\\BXTSDW_LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0_anonymized.json; foreach \\($ln in 6472,6610,6748,6886,7090\\) { $j[\\($ln-4\\)..\\($ln+6\\)]; '---' })",
+      "Bash(python3 generate.py --site bxt)",
+      "Bash(cp -r C:/__CODE/nac4/templates/. C:/__CODE/nac4/_restore/280826/templates/)",
+      "Bash(cp -r C:/__CODE/nac4/root-template/. C:/__CODE/nac4/_restore/280826/root-template/)",
+      "Bash(cp C:/__CODE/nac4/values/*.yaml C:/__CODE/nac4/_restore/280826/values/)",
+      "Bash(python3 *)"
+    ]
+  }
+}

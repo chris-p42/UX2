@@ -30,7 +30,7 @@
 #
 # The directory is still named values/aar/ although it now holds the whole
 # traffic policy, not just app-aware routing.  Renaming it touches generate.py,
-# AGENTS.md and README.md; left as a deliberate follow-up rather than churn in
+# CLAUDE.md and README.md; left as a deliberate follow-up rather than churn in
 # the middle of an apply.
 
 sdwan:

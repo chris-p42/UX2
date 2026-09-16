@@ -1,0 +1,43 @@
+# templates/_shared/policy.yaml
+#
+# Policy group per site — used by every variant.  Routers attach it via
+# sdwan.sites[].routers[].policy_group (see site-values.yaml).
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0
+# (sdwan_policy_groups.tf, sdwan_feature_profiles.tf) — two findings that
+# changed the original per-site design:
+#   - A policy group references only application_priority and ngfw_security
+#     profiles (by name).  There is no policy-object link on it.
+#   - feature_profiles.policy_object_profile is a SINGLE GLOBAL object
+#     (vManage allows one per tenant) — the original per-site PO-BEL
+#     objects were impossible and have been removed.
+#
+# TODO (next modelling pass): QoS / app-aware-routing policy belongs in
+# sdwan.feature_profiles.application_priority_profiles[] referenced from
+# the policy group as `application_priority: <name>`
+# (see sdwan_features_application_priority.tf).  The DSCP values for that
+# pass are staged in globals.yaml `qos_dscp` (decimal integers — hard rule).
+# Until then each PG is an empty but valid policy group.
+
+sdwan:
+  feature_profiles:
+    policy_object_profile:
+      ipv4_prefix_lists:
+        - name: "LO_BB_PFX"
+          entries:
+            - prefix: 69.184.0.0/16
+              le: 32
+            - prefix: 160.43.0.0/16
+              le: 32
+            - prefix: 199.105.176.0/21
+              le: 32
+            - prefix: 199.105.184.0/23
+              le: 32
+            - prefix: 208.134.161.0/24
+              le: 32
+            - prefix: 208.183.246.0/24
+              le: 32
+  policy_groups:
+    - name: "PG-__SITE__"
+      description: "Policy group - __SITE__"
+

@@ -2,7 +2,7 @@
 #
 # BRANCH-ONLY policy objects.  Everything the branches share with the DC
 # (profile name, forwarding classes, SLA classes, application lists, data prefix
-# lists) lives in templates/_shared/policy-objects-common.yaml since 2026-09-02; the
+# lists) lives in templates/_shared/policy-objects.yaml since 2026-09-02; the
 # two files merge into one PO-__SITE__ profile — see the SPLIT ACROSS FILES note
 # there.  Only the prefix list below is branch-specific: it backs the outbound
 # BGP route-maps in service.yaml / service-b.yaml / service-routed.yaml, and the
@@ -18,7 +18,7 @@
 # disappears from the route-map (no error, no warning — a permit sequence that
 # matches everything).  Object and reference must be co-located in one root.
 # A shared-root design was evaluated and rejected on 2026-08-18 for this reason;
-# see AGENTS.md "Policy objects".
+# see CLAUDE.md "Policy objects".
 #
 # CONSEQUENCE: the definitions are written once in templates/ and distributed by
 # generate.py into every site, so vManage ends up with N profiles (PO-BXT,

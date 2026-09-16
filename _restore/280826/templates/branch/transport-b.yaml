@@ -1,0 +1,90 @@
+# templates/branch/transport-b.yaml
+#
+# Branch variant WITHOUT MPLS TLOC-EXT: 2 TLOCs total (custom1/custom2
+# Internet only) — no MPLS port, no cross-connect, no VPN 0 OSPF.
+#
+# SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0 — same conventions as
+# transport-a.yaml (static `name:` per interface, `<field>_variable:` for
+# per-device values).  ALL IPv4 settings (address AND mask) are device
+# variables — no static IP values anywhere in this template.
+# Ethernet address variables explicitly set `ipv4_address_type: static`, as
+# required by the provider when `ipv4_address_variable` is used.
+#
+# KNOWN vManage LIMITATION: bandwidth_downstream / shaping_rate are parcel
+# metadata only — 20.13 UX2 never renders them into cEdge CLI (constant or
+# variable; validated live on BXT 2026-07-29, see transport-a.yaml header).
+#
+# ASSUMPTION: no branch-b site has been exported from vManage yet; this is
+# the branch-a model minus MPLS/TLOC-EXT, and the /24 + /20 masks are
+# carried over from the BXT export.  Verify against a real branch-b export
+# when one exists.  First consumer: values/cml.yaml (added 2026-07-30, not
+# yet deployed) — see templates/branch/service-b.yaml for how CML's
+# service-profile design (per-VLAN access ports instead of a single
+# trunk) differs from branch-a's.
+
+sdwan:
+  feature_profiles:
+    transport_profiles:
+      - name: "TRANS-__SITE__"
+        description: "Transport profile - __SITE__ (no TLOC-EXT)"
+
+        # VPN 0 — transport VPN
+        wan_vpn:
+          ipv4_primary_dns_address_variable: vpn0_dns_primary
+          ipv4_secondary_dns_address_variable: vpn0_dns_secondary
+
+          # Internet-only: one 0/0 with a next-hop per ISP
+          ipv4_static_routes:
+            - network_address: "0.0.0.0"
+              subnet_mask: "0.0.0.0"
+              next_hops:
+                - address_variable: vpn0_gw_inet1
+                - address_variable: vpn0_gw_inet2
+
+          ethernet_interfaces:
+
+            # --- Internet 1 (color custom1) ---
+            - name: "INET1"
+              description: "Internet 1 uplink"
+              interface_description_variable: vpn0_inet1_desc   # CLI port description
+              interface_name_variable: vpn0_inet1_ifname
+              shutdown_variable: vpn0_inet1_shutdown
+              ipv4_address_type: static
+              ipv4_address_variable: vpn0_inet1_ip
+              ipv4_subnet_mask_variable: vpn0_inet1_mask
+              bandwidth_downstream_variable: vpn0_inet1_bw_down
+              shaping_rate_variable: vpn0_inet1_shape
+              # DIA NAT (requirement 2026-07-29): per-router on/off via the
+              # vpn0_inet1_nat device variable ('true'/'false' in values/);
+              # type `interface` = overload on the WAN address.
+              ipv4_nat: true
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_inet1_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_inet1_pref
+                # Flat allow_service_* keys are the canonical NaC 1.4.0 form —
+                # see templates/branch/transport-a.yaml INET1 note.
+                allow_service_https: false
+                allow_service_ospf: false    # no OSPF on internet colors
+
+            # --- Internet 2 (color custom2) ---
+            - name: "INET2"
+              description: "Internet 2 uplink"
+              interface_description_variable: vpn0_inet2_desc   # CLI port description
+              interface_name_variable: vpn0_inet2_ifname
+              shutdown_variable: vpn0_inet2_shutdown
+              ipv4_address_type: static
+              ipv4_address_variable: vpn0_inet2_ip
+              ipv4_subnet_mask_variable: vpn0_inet2_mask
+              bandwidth_downstream_variable: vpn0_inet2_bw_down
+              shaping_rate_variable: vpn0_inet2_shape
+              # DIA NAT — see INET1 note
+              ipv4_nat: true
+              ipv4_nat_type: interface
+              tunnel_interface:
+                color_variable: vpn0_inet2_color
+                ipsec_encapsulation: true
+                ipsec_preference_variable: vpn0_inet2_pref
+                allow_service_https: false
+                allow_service_ospf: false

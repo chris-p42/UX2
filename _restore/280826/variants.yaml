@@ -1,0 +1,64 @@
+# variants.yaml
+#
+# Maps each site variant to the template files it contributes to data/.
+# generate.py loads this file at startup; editing it here is the only place
+# variant template lists need to change (no generate.py edit required).
+#
+# Variants confirmed from UX1 exports (2026-07-20 vManage snapshot):
+#   dc              — C8500-12X hub; OOB VPN 512 management; no TLOC-EXT.
+#   branch-a        — C8200L with MPLS TLOC-EXT active (private1/private2 colors).
+#   branch-b        — C8200L without MPLS TLOC-EXT.
+#   branch-a-routed — Pure-edge (C8000V/ISR); routed subinterfaces, MPLS + TLOC-EXT.
+#   branch-b-routed — Pure-edge (C8000V/ISR); routed subinterfaces, internet-only.
+#
+# aaa_tacacs.yaml is variant-specific: DC uses tacacs-512/VPN-512/Gi0,
+# branches use tacacs-10/VPN-10/Loopback10. The auth_order is shared and
+# lives in _shared/system.yaml.
+
+# Applied to every variant before the variant-specific files below.
+shared_templates:
+  - _shared/system.yaml
+  - _shared/policy.yaml
+
+variants:
+  dc:
+    - dc/service.yaml
+    - dc/transport.yaml
+    - dc/cli.yaml
+    - dc/config-group.yaml
+    - dc/aaa_tacacs.yaml       # DC TACACS group: tacacs-512, VPN 512, source GigabitEthernet0
+
+  branch-a:
+    - branch/service.yaml
+    - branch/transport-a.yaml  # includes MPLS TLOC-EXT parcels
+    - branch/cli.yaml          # BGP-VPN10 fall-over bfd supplement (neighbor CLI add-on)
+    - branch/policy-objects.yaml  # PO-__SITE__ prefix-lists for the BGP route-maps
+    - branch/config-group.yaml
+    - branch/aaa_tacacs.yaml   # Branch TACACS group: tacacs-10, VPN 10, source Loopback10
+
+  branch-b:
+    - branch/service-b.yaml    # access-port LAN model (no trunk — see service-b.yaml header)
+    - branch/transport-b.yaml  # no TLOC-EXT
+    - branch/cli.yaml          # BGP-VPN10 fall-over bfd supplement (neighbor CLI add-on)
+    - branch/policy-objects.yaml  # PO-__SITE__ prefix-lists for the BGP route-maps
+    - branch/config-group.yaml
+    - branch/aaa_tacacs.yaml   # same TACACS group as branch-a
+
+  # Pure-edge variants — IOS-XE platforms with no switchport ASIC (C8000V, ISR, etc.).
+  # LAN handoff uses routed subinterfaces (GigabitEthernet5.3103 style) instead of
+  # switchport-trunk + VLAN SVIs. Transport template identical to -a / -b counterpart.
+  branch-a-routed:
+    - branch/service-routed.yaml  # routed subinterface LAN model
+    - branch/transport-a.yaml     # MPLS + TLOC-EXT transport (same as branch-a)
+    - branch/cli.yaml             # BGP-VPN10 fall-over bfd supplement (neighbor CLI add-on)
+    - branch/policy-objects.yaml  # PO-__SITE__ prefix-lists for the BGP route-maps
+    - branch/config-group.yaml
+    - branch/aaa_tacacs.yaml
+
+  branch-b-routed:
+    - branch/service-routed.yaml  # routed subinterface LAN model
+    - branch/transport-b.yaml     # internet-only, no TLOC-EXT (same as branch-b)
+    - branch/cli.yaml             # BGP-VPN10 fall-over bfd supplement (neighbor CLI add-on)
+    - branch/policy-objects.yaml  # PO-__SITE__ prefix-lists for the BGP route-maps
+    - branch/config-group.yaml
+    - branch/aaa_tacacs.yaml

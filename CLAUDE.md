@@ -1,1 +1,282 @@
-@AGENTS.md
+# CLAUDE.md
+
+Guidance for Claude Code when working in this repository.
+
+## What this is
+
+A Cisco Catalyst SD-WAN NaC (Network-as-Code) repo, UX2 paradigm, built on
+the `netascode/nac-sdwan/sdwan` Terraform module (v1.4.0).
+
+**Real sites** (imported 2026-07 from UX1 vManage exports; the raw `UX1/`
+export folder lives in the sibling `nac4_bkp/` repo, not here):
+- **`BEL` = the DC hub** (`values/bel.yaml`, variant `dc`, site_id 1100,
+  C8500-12X pair, VPN 512 OOB management) — still placeholder-blocked
+  (masks/IPs/chassis IDs/BGP AS), never planned or applied
+- **`BXT` = branch test-lab** (`values/bxt.yaml`, variant `branch-a-routed`,
+  deployed lab site_id 110 — moved from 3 on 2026-07-30 to free that id for
+  `CML`; the UX1 export historically used 1405 —
+  C8200L pair, MPLS TLOC-EXT active) — **live-deployed** (CG-BXT/PG-BXT
+  applied against vManage; state in `sites/bxt/terraform.tfstate`)
+- **`CML`** (`values/cml.yaml`, variant `branch-b-routed`, site_id 3) — started as
+  a BXT duplicate on 2026-07-30, then redesigned to CML's own spec: no
+  MPLS/TLOC-EXT; same CORP+INFRA dual-BGP-peer VPN10 model as BXT, but the
+  LAN handoff is three untagged access ports (`lan_corp_ifname`/
+  `lan_infra_ifname`/`lan_vlan62_ifname`, one per VLAN including the user
+  VLAN 62) instead of a trunk, because CML's VMs can't do 802.1Q trunking.
+  CML's own interface numbering
+  (`GigabitEthernetN`, not BXT's `GigabitEthernet0/0/N`) — WAN on Gi1/Gi3,
+  LAN access on Gi5 (INFRA)/Gi6 (CORP)/Gi7 (VLAN62 — restored 2026-07-30,
+  its own access port for the same no-trunk reason). Uses
+  `templates/branch/service-routed.yaml` (NOT service.yaml / service-b.yaml)
+  — see that file and `generate.py`'s `VARIANTS["branch-b-routed"]`. Still
+  carries BXT's chassis_id serials, hostnames (pardw01/pardw02), and IPs
+  since CML's real hardware values aren't known yet. Not yet deployed; update
+  `device_variables` with CML's own values before planning/applying.
+  First real site to exercise the `branch-b-routed` variant (see
+  `DEMO/README.md`).
+
+**Placeholder scaffold sites** (fake data, predate the import): `dc-hub`,
+`nyc`, `chicago`, `paris`, `london` (regions `dc-hub`/`na`/`emea`) —
+parked in `DEMO/`, ignored by `generate.py` (which reads `values/*.yaml`
+only). `DEMO/dc-hub.yaml` is NOT the real DC — `BEL` is. See
+`DEMO/README.md` for how to temporarily reactivate one; never
+`terraform apply` a DEMO site.
+
+This is the **`nac4` layout**: single source of truth in `templates/` +
+`values/` + `globals.yaml`, distributed by `generate.py` into per-site,
+per-state Terraform roots under `sites/` (generated, gitignored). See
+`README.md`, `DESIGN.md`/`COMPARISON.md` (if present) for why this layout
+was chosen over `nac`/`nac2`/`nac3`.
+
+**There is an unrelated older repo** (different fabric management approach:
+hand-rolled Terraform modules directly on the raw `CiscoDevNet/sdwan`
+provider, no NaC module). That approach was explicitly abandoned for this
+fabric — do not reintroduce it, do not import patterns from it into this
+repo without being asked.
+
+## Hard rules
+
+- **The whole traffic policy is per site: `values/aar/<site_code>.yaml`, one
+  file per site, and every site MUST have one** (decision 2026-09-03). `generate.py`
+  renders it to `sites/<site>/data/aar.yaml` through the same pipeline as
+  `templates/` (`__SITE__` and `__GLOBAL:` both apply) and aborts by name if the
+  file is missing — a site silently without AAR is not detectable afterwards.
+  It is a SUBDIRECTORY on purpose: `VALUES.glob("*.yaml")` is not recursive, so
+  these files are not mistaken for site definitions. The rest of the Application
+  Priority profile stays shared — the profile identity in
+  `_shared/application-priority-common.yaml`, the `QOS-<SITE>` scheduler in the
+  variant file. QoS classification and app-aware routing are ONE parcel
+  (`TRAFFIC-<SITE>`, direction `all`): vManage refuses two traffic policies that
+  overlap on (VPN, direction), `PPARC0008`, hit live 2026-09-04 — and `all`
+  subsumes `service`. Each sequence therefore carries the union of the actions
+  UX1's two independent policies applied; see `values/aar/_README.md` for the
+  one documented residual divergence (DSCP 32). Reason the AAR alone is split out: `preferred_colors` should only
+  name colors the site's own transports carry (BXT private1+private2, BEL
+  private1 only, CML internet-only). Naming an absent color is a no-op, not a
+  failure — the preference applies among tunnels that already meet the SLA, and
+  falls through to any of them when no listed color is present; `strict` is a
+  separate knob that drops traffic when NO tunnel meets the SLA, and does not
+  react to color availability. The lists are kept truthful per site because they
+  are documentation the device cannot contradict, not because a wrong one
+  breaks. See `values/aar/_README.md`.
+- **Never hand-edit anything under `sites/`.** It's generated by
+  `generate.py` from `templates/` + `values/` + `globals.yaml`. If a
+  generated file looks wrong, fix the template/value/global that produced
+  it and regenerate — don't patch the output directly.
+- **Never write into `values/` directly from a migration/conversion
+  script.** Write to `values.generated/` (or another staging dir) and
+  require an explicit `--force` flag to target `values/` itself. This
+  applies to `csv_to_values.py` and any future conversion tooling.
+- A fact belongs in `globals.yaml` only if it's genuinely identical
+  fabric-wide. If it varies by variant (dc vs branch-a vs branch-b), it
+  belongs directly in `templates/dc/*.yaml` / `templates/branch/*.yaml`
+  instead — don't promote something to global just because two variants
+  currently happen to agree.
+- **DSCP values are always decimal integers, never PHB keywords** (EF=46,
+  AF31=26, default=0 — see `globals.yaml`'s `qos_dscp` block).
+- Every router attach needs an explicit `configuration_group_deploy` /
+  `policy_group_deploy` decision (UX2 deploy gate; `false` = create in
+  vManage but don't push). Separately, every router's `device_variables`
+  needs `pseudo_commit_timer: 0`; the provider treats it as a config-group
+  system variable, not as the deploy gate (live-validated 2026-07-27).
+  generate.py emits both deploy flags as `false` — flipping either to
+  `true` is a deliberate per-deploy action.
+- Credentials via `SDWAN_USERNAME`/`SDWAN_PASSWORD`/`SDWAN_URL`/
+  `SDWAN_INSECURE`/`SDWAN_RETRIES` env vars only — never hardcoded in
+  `.tf` or `.yaml`, never committed.
+- Never commit `terraform.tfvars`, `*.tfstate`, `.terraform/`.
+- `site_id` must be unique across every file in `values/`, and the
+  top-level `site_id` must equal every router's `device_variables.site_id`
+  (the per-router value is what reaches the device attach; `generate.py`
+  hard-errors on a mismatch).
+- **Policy objects (vManage "Groups of Interest") live in
+  `templates/branch/policy-objects.yaml`, one profile per site
+  (`PO-__SITE__`)** — never in `_shared/`, never in `globals.yaml`, never in
+  a separate "global objects" Terraform root. The module resolves a route
+  policy's prefix-list match against the policy-object resource of the
+  CURRENT root (`sdwan_features_service.tf:2037`), so an object declared in
+  another root resolves to `null` through `try()` and the `match ip address
+  prefix-list` silently disappears — no error, just a route-map that matches
+  everything. Object and reference MUST be co-located in one root. A shared
+  root was evaluated and rejected for this reason (decision 2026-08-18).
+- Only attach `policy_object_profile:` to a config group in a variant that
+  actually declares policy objects. `sdwan_configuration_groups.tf:10` indexes
+  `policy_object_feature_profile[0]`, which does not exist in a root declaring
+  none. Since 2026-09-01 EVERY variant declares them (the `dc` variant too),
+  so every config group attaches the profile — the constraint still holds, it
+  is just no longer a reason to keep `dc` empty.
+- **Policy objects are split across three files that MERGE into one
+  `PO-<SITE>` profile** (since 2026-09-02): `_shared/policy-objects-common.yaml`
+  carries the profile name and everything identical fabric-wide (forwarding
+  classes, SLA classes, application lists, data prefix lists);
+  `dc/policy-objects.yaml` adds only `LO_VIDEO` (queue 1);
+  `branch/policy-objects.yaml` adds only `LO_BB_PFX`. Same pattern for
+  `application_priority_profiles`: the two traffic policies live in
+  `_shared/application-priority-common.yaml`, only the QoS scheduler is
+  per-variant. The NaC module merges every YAML under `data/` before reading
+  it, so this is safe — but with two conditions. Output files are named by
+  BASENAME, so two templates from different directories must never share a file
+  name (`generate.py` hard-errors on such a collision). And **exactly ONE file
+  may declare a profile's scalar keys** (`name`, `description`): items merge by
+  `name` only while their scalars agree, so a second, different `description`
+  makes the merge keep them apart and terraform aborts the plan with
+  `Two different items produced the key ...` — hit live 2026-09-04 on BEL.
+  `validate_model.py` check 9 fails on any such conflict.
+- **`application_lists[]` takes `applications:`, not `entries:`**
+  (`sdwan_policy_objects.tf:20` reads `try(each.value.applications, [])`). An
+  `entries:` list yields an EMPTY application list in vManage with no terraform
+  error at all — the match simply never fires.
+- **Parcel names are capped at 32 characters, suffix included** — established
+  2026-09-04 on a live apply from `sites/bxt`: the two application lists at 34
+  characters were rejected with HTTP 400 `SCHVALID0001` /
+  `{"Validation Errors":{"Invalid Format Attributes":["name"]}}` while every
+  name at 31 or below was created. vManage names the field but never the rule,
+  so the limit was derived by comparing what failed against what passed.
+  BUDGET: the `-<SITE>` suffix costs `1 + len(site_code)`, leaving **28
+  characters** for the base name written in `templates/` with today's 3-letter
+  site codes, 27 with a 4-letter one. `validate_model.py` check 7 fails on any
+  name over 32 and warns above 31 — run it before every apply; the error only
+  ever appears at APPLY time, never at plan.
+- **Parcel names are unique across the WHOLE tenant, not per profile or per
+  config group** — established 2026-08-19 by `PPARC0012` ("Duplicate parcel
+  name LO_BB_PFX found in config group CG-CML") on an apply run from
+  `sites/bxt`, and documented by Cisco ("An error occurs when a duplicate
+  parcel name (for example, Site27-VPN1) exists in another configuration
+  group"). Every policy object therefore carries the `-__SITE__` suffix
+  (`LO_BB_PFX-__SITE__`), which is Cisco's own documented convention. The
+  suffix reaches the device: `ip prefix-list LO_BB_PFX-BXT`, so operational
+  procedures must treat these names as per-site. Never drop the suffix — the
+  second site applied would fail.
+  Route-map names are deliberately NOT suffixed yet (decision 2026-08-19):
+  route policies are parcels too, so the rule may apply to them, but that is
+  unproven and a per-site route-map name has a real operational cost. The
+  next multi-site apply settles it.
+- Deliberate ALL_CAPS_UNDERSCORE object names (route-maps, prefix-lists —
+  they are rendered verbatim into the device running-config) must be added to
+  `KNOWN_OBJECT_NAMES` in `generate.py`, or the placeholder scan reports them
+  and `--strict` aborts. Keep that a closed list, never a regex: a typo'd
+  object name must still be reported. The `-__SITE__` suffix needs no entry of
+  its own: the scan runs on rendered text and `PLACEHOLDER_RE` stops at the
+  hyphen.
+- **The VPN 10 default route reaches the branches from BEL and nowhere else.**
+  `templates/dc/service.yaml` carries
+  `lan_vpns[VPN10].ipv4_omp_advertise_routes: [{protocol: network, networks:
+  [0.0.0.0/0]}]` — `protocol: network`, NOT `ospf`: the parcel has two shapes
+  (redistribute a whole source RIB with no prefix list, or advertise named
+  prefixes with `network`/`aggregate`), and `ospf` + a prefix list matches
+  neither. vManage rejects it with `SCHVALID0001 Invalid Format Attributes:
+  data.ompAdvertiseIp4[0].ompProtocol` even though the PROVIDER documents `ospf`
+  as a valid value — provider-valid is not vManage-valid, hit live 2026-09-04 — the hub relays into OMP the default the DC core injects over
+  the campus LAG. Each branch then re-advertises it to its SDA border with MED
+  1000 (`ipv4_networks: 0.0.0.0/0` + `route_policy_out: OMP_TO_BGP_1000_MED`).
+  The explicit `networks:` entry is REQUIRED even though the shared OMP parcel
+  sets `advertise_ipv4_ospf: true`: that flag redistributes the OSPF RIB, but
+  OMP does not carry `0.0.0.0/0` on redistribution alone. Delete the block and
+  the branches' `network 0.0.0.0 0.0.0.0` silently matches nothing — no error
+  anywhere, the SDA borders just never learn a default.
+- **Never run `terraform apply` without showing the plan and getting
+  explicit approval.** Never `terraform taint` / `terraform state rm`
+  without explicit approval.
+
+## Key mechanisms — read before editing templates/ or generate.py
+
+- **`__SITE__` token**: any template string containing this gets it
+  replaced with the site's `site_code` (uppercased) at generate time —
+  this is how `SYS-__SITE__` becomes `SYS-BXT`. Plain string substitution,
+  not YAML-aware.
+- **`__GLOBAL:<dotted.key>__` token**: a template SCALAR value exactly
+  matching this pattern gets replaced with that value from `globals.yaml`,
+  type preserved (a list global substitutes in as a list). This IS
+  YAML-aware — `generate.py` parses the file, walks it recursively, and
+  re-dumps it, but only for files that actually contain a `__GLOBAL:`
+  reference (files without one keep their raw text + comments as-is).
+  Unknown key → the run fails immediately with the bad key named in the
+  error. Never make this fail silently or fall back to a guess.
+- **`variant`** (`dc` / `branch-a` / `branch-b`) in each `values/<site>.yaml`
+  determines which template files get pulled in — see the `VARIANTS` dict
+  in `generate.py`.
+
+## Commands
+
+```bash
+pip install -r requirements.txt
+python3 generate.py                # regenerate every site
+python3 generate.py --site bxt     # regenerate a single site
+
+python3 csv_to_values.py <export.csv>              # inspect / auto-detect only
+python3 csv_to_values.py <export.csv> --site-map site-map.yaml   # full run, staging dir
+
+cd sites/<site>/
+terraform init
+terraform plan -out=tfplan
+terraform apply tfplan             # only after explicit approval
+```
+
+## Known open items (still unverified against a live vManage / real schema)
+
+> **Project tracking lives in `UX2_PROJECT.md`** — what is done, what is
+> blocked, what is deferred, with the evidence for each. Update that file,
+> not this list. What follows is only the schema/design caveats that matter
+> while editing `templates/`; anything here that gets settled should be
+> struck out and recorded in `UX2_PROJECT.md`.
+
+- Exact parcel/key names throughout `templates/` — written without access
+  to `nac/schema/sdwan.schema.json`; marked `TODO: verify` at each guess.
+- Site→variant assignment for the parked DEMO placeholders (`nyc`/`paris` =
+  `branch-a`, `chicago`/`london` = `branch-b`) — unconfirmed assumption,
+  now low-priority since they moved to `DEMO/`. The real sites' variants
+  (BEL = `dc`, BXT = `branch-a`) are confirmed from the UX1 exports.
+- TLOC-EXT field semantics, DC service-profile-without-interface, real
+  AAA/radius server details,
+  real port-channel CLI for the DC hub campus LAG (`templates/dc/cli.yaml`).
+- ~~Hub-and-spoke control topology policy.~~ MOOT 2026-09-02: the vManage
+  export (`DATA/policies.json`) contains NO `hubAndSpoke` definition at all.
+  The activated `LO_Central_Policy_V5` is 2 data policies + cflowd + LO_AAR +
+  2 control policies (NYC site 3200 / NYD site 3300). The `sites/fabric/` root
+  sketched in `DATA/claude_chat.md` was designed around an assumption the
+  export disproves — recast it around cflowd and the NYC/NYD control policies
+  if it is built at all. None of those objects touch BEL/BXT/CML.
+- ~~Whether `netascode/nac-sdwan/sdwan` 1.4.0's actual schema matches the key
+  names used here at all.~~ CLOSED 2026-09-02: the module source is available
+  locally at `../backup_20260901_nac4/sites/bel/.terraform/modules/sdwan/` —
+  read it instead of guessing. The policy-object and application-priority keys
+  were validated against it in that session; the transport/service/system ones
+  still carry their original `TODO: verify` markers.
+- **Does the tenant-wide parcel-name rule apply to EVERY parcel type?** The
+  Cisco wording is general and its example (`Site27-VPN1`) is a VPN parcel,
+  yet this repo ships static names on almost every parcel — `sites/bxt/data/
+  system.yaml` alone has `global`, `fabric_security`, `omp`, and the service/
+  transport profiles add `VPN10`, `BGP-VPN10`, `OSPF-VPN0`, `LOOPBACK10`,
+  `INET1`, `MPLS`, `DHCP-VLAN253`. If the rule were universal, nac-sdwan
+  could not deploy two sites at all, which is not credible — so the rule is
+  probably narrower than the doc sentence suggests. To settle it: check
+  whether the CML apply created `SYS-CML` with its `global`/`omp` parcels
+  while BXT already had them. If it did NOT, the whole repo's naming needs
+  the `__SITE__` treatment, not just the policy objects.
+- Whether a config group must reference `policy_object_profile` at all for a
+  device to render `ip prefix-list` — the objects may resolve by parcel id
+  alone. If the attachment proves unnecessary, drop the key from
+  `templates/branch/config-group.yaml`.
+- `route_policies[]` `base_action: accept` / `default_action: reject` are
+  inferred from the module's other features, not from the provider schema —
+  confirm on the first `terraform plan`.

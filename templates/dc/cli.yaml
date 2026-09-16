@@ -1,53 +1,25 @@
 # templates/dc/cli.yaml
 #
-# DC hub campus LAN LAG — CLI add-on feature profile.
-# Port-channel (LACP), PnP startup VLAN, PIM multicast on campus sub-interfaces.
-#
-# The UX2 CLI escape hatch is a CLI feature profile + CLI config feature ONLY —
-# never the UX1 constructs (sdwan_feature_template, sdwan_cli_template_feature_template,
-# sdwan_cli_device_template).
+# DC hub's campus LAN LAG has no native UX2 LAG parcel, so it's expressed as
+# a CLI add-on feature.  The UX2 CLI escape hatch is a CLI feature profile +
+# CLI config feature ONLY — never the UX1 constructs (sdwan_feature_template,
+# sdwan_cli_template_feature_template, sdwan_cli_device_template).
 #
 # SCHEMA-VALIDATED 2026-07-24 against nac-sdwan 1.4.0 (sdwan_features_cli.tf):
 #   cli_profiles[].config.cli_configuration (string) — validated.
 #
-# Device variables ({{varname}} syntax, resolved by vManage at push time —
-# TODO: verify {{varname}} in CLI add-ons against a real BEL device push):
-#   pc_id              port-channel logical ID (e.g. 1)
-#   pc_lacp_mode       LACP mode: active | passive | on
-#   pc_member1         first member interface (e.g. TenGigabitEthernet0/0/0)
-#   pc_member2         second member interface
-#   pnp_startup_vlan   PnP onboarding VLAN
-#   pim_rp_address     PIM rendezvous point IP (same on both cEdges)
-#   pim_dr_priority    DR election priority (10 on cEdge-A, 1 on cEdge-B)
-#   campus_vlan_corp   VLAN ID for the CORP campus sub-interface
-#   campus_vlan_infra  VLAN ID for the INFRA campus sub-interface
+# TODO: replace the placeholder CLI block with the real port-channel /
+# LACP config for the DC campus LAG.
 
 sdwan:
   feature_profiles:
     cli_profiles:
       - name: "CLI-__SITE__"
-        description: "CLI add-on — LACP port-channel, PnP, PIM"
+        description: "CLI add-on - BEL (campus port-channel)"
         config:
           name: "CLI-CONFIG-__SITE__"
+          # TODO: fill in real port-channel / LACP config
           cli_configuration: |
-            ! ── LACP port-channel ──────────────────────────────────────────
-            interface {{pc_member1}}
-             channel-group {{pc_id}} mode {{pc_lacp_mode}}
-            interface {{pc_member2}}
-             channel-group {{pc_id}} mode {{pc_lacp_mode}}
-            interface Port-channel{{pc_id}}
+            interface Port-channel1
              description CAMPUS-LAG
              no shutdown
-            !
-            ! ── PnP ────────────────────────────────────────────────────────
-            pnp startup-vlan {{pnp_startup_vlan}}
-            !
-            ! ── PIM multicast ───────────────────────────────────────────────
-            ip multicast-routing vrf 10
-            ip pim vrf 10 rp-address {{pim_rp_address}}
-            interface Port-channel{{pc_id}}.{{campus_vlan_corp}}
-             ip pim sparse-mode
-             ip pim dr-priority {{pim_dr_priority}}
-            interface Port-channel{{pc_id}}.{{campus_vlan_infra}}
-             ip pim sparse-mode
-             ip pim dr-priority {{pim_dr_priority}}

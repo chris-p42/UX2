@@ -2,9 +2,9 @@
 #
 # DC-ONLY part of the Application Priority profile: the QoS scheduler.
 # The profile itself and both traffic policies (AAR + QoS classification) are
-# fabric-wide and live in templates/_shared/application-priority-common.yaml; the two
+# fabric-wide and live in templates/_shared/application-priority.yaml; the two
 # files merge into one APP-PRIORITY-__SITE__ profile (see the SPLIT ACROSS FILES
-# note in templates/_shared/policy-objects-common.yaml).
+# note in templates/_shared/policy-objects.yaml).
 #
 # Source: UX1 localized qosMap LO_QOSMAP (V1), from LO_DC_Local_Policy.
 # Bandwidth split: 10+20+10+15+15+15+10+5 = 100%.

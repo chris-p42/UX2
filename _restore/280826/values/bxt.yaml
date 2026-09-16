@@ -1,0 +1,324 @@
+# values/bxt.yaml
+#
+# Branch test-lab site — site-id 3 (lab attach; the UX1 export historically
+# used 1405), Europe/Zurich timezone.
+# Device template: LO_BR_C8200L_DEVICE_TEMPLATE_TEST_V1.4.0
+# Hardware       : Cisco Catalyst C8200L-1N-4T (vedge-C8200L-1N-4T)
+# Variant        : branch-a (MPLS TLOC-EXT active on both routers,
+#                  private1/private2 colors; confirmed from UX1 export)
+#
+# Two routers — primary (router1 / SD-WAN01) and secondary (router2 / SD-WAN02).
+# IPsec preference: primary router takes 200 (preferred), secondary takes 100.
+#
+# SCHEMA NOTE (2026-07-24): these variables feed the `<field>_variable:`
+# references in templates/ (UX2 config-group variables).  IP addresses are
+# ADDRESS ONLY — subnet masks are static in the templates (the module takes
+# address and mask as separate fields).  chassis_id is REQUIRED by the
+# module for device attach; the anonymised export did not carry it —
+# CHASSIS_ID_* placeholders below until real serials are known.
+#
+# Anonymised placeholder strings (ROUTER_ID_*, BGP_*, CHASSIS_ID_*,
+# OSPF_*, GPS_*) must be filled in with real values before deploying.
+# generate.py warns about every one it finds in the rendered output.
+
+site_code: BXT
+variant: branch-a-routed
+# Deployed lab site-id. Must match device_variables.*.site_id below — the
+# per-router value is what actually reaches the device attach; this top-level
+# field feeds the cross-site uniqueness check (mismatch = generate.py error).
+site_id: 3
+##
+## port conversion C8200 > CML 
+## ISP1 GigabitEthernet0/0/0 GigabitEthernet1
+## MPLS GigabitEthernet0/0/1 GigabitEthernet2
+## ISP2 GigabitEthernet0/0/2 GigabitEthernet3
+## TLOC-EXT GigabitEthernet0/0/3 GigabitEthernet4
+## LAN GigabitEthernet0/1/1 GigabitEthernet5
+##
+device_variables:
+  router1:
+    hostname: bxtdw01
+    system_ip:  10.0.0.3
+    site_id: 3
+    pseudo_commit_timer: 0  # config-group system variable; not a deploy gate
+    chassis_id: C8K-27148AFE-7160-69D3-ACC5-F77560530D63   # REQUIRED: real chassis/serial from vManage
+
+    # System
+    port_offset: '0'
+    timezone: Europe/Zurich
+    gps_lat: '46.18948'
+    gps_lon: '6.11220'
+
+    # ThousandEyes Enterprise Agent values are intentionally omitted until
+    # an active `other_profile.thousandeyes` parcel references them. Sending
+    # unreferenced keys makes vManage reject the config-group device payload.
+
+    # VPN 0 — OSPF (underlay toward MPLS PE / TLOC-EXT cross-connect)
+    vpn0_ospf_router_id: 10.3.3.1
+    # vpn0_ospf_private_if: GigabitEthernet0/0/1     #MPLS-facing if
+    vpn0_ospf_private_if: GigabitEthernet2     #MPLS-facing if
+    # vpn0_ospf_tloc_if: GigabitEthernet0/0/3.992    #TLOC-EXT-facing if
+    vpn0_ospf_tloc_if: GigabitEthernet4.991    #TLOC-EXT-facing if
+
+    # VPN 0 — DNS (Internet-side resolvers)
+    vpn0_dns_primary: 172.16.1.254 
+    vpn0_dns_secondary: 172.16.2.254
+    
+    # VPN 0 — default-route next-hops (one per upstream; MPLS is active on BXT branch-a)
+    vpn0_gw_inet1: 172.16.1.254  # ISP1 gateway
+    vpn0_gw_inet2: 172.16.3.254  # ISP2 gateway
+    vpn0_gw_mpls1: 172.16.2.254   # MPLS 1 next-hop
+    vpn0_gw_mpls2: 172.25.5.2   # MPLS 2 next-hop (via TLOC-EXT relay)
+
+    # VPN 0 — Internet 1 (color custom1); mask /24 static in template
+    # vpn0_inet1_ifname: GigabitEthernet0/0/0
+    vpn0_inet1_ifname: GigabitEthernet1
+    vpn0_inet1_ip: 172.16.1.30
+    vpn0_inet1_mask: 255.255.255.0 #not decimal
+    vpn0_inet1_bw_down: '100000'  # kbps
+    vpn0_inet1_shape: '100000'    # kbps
+    vpn0_inet1_color: custom1
+    vpn0_inet1_pref: '200'        # higher preference on primary router
+    vpn0_inet1_shutdown: 'false'   # shutdown until ISP circuit is live
+    vpn0_inet1_desc: BXT INTERNET 1   # port description
+
+    # VPN 0 — Internet 2 (color custom2); mask /20 static in template
+    # vpn0_inet2_ifname: GigabitEthernet0/0/2
+    vpn0_inet2_ifname: GigabitEthernet3
+    vpn0_inet2_ip: 172.16.3.30
+    vpn0_inet2_mask: 255.255.255.0
+    vpn0_inet2_bw_down: '100000'
+    vpn0_inet2_shape: '100000'
+    vpn0_inet2_color: custom2
+    vpn0_inet2_pref: '200'
+    vpn0_inet2_shutdown: 'false'
+    vpn0_inet2_desc: BXT INTERNET 2   # port description
+
+    # VPN 0 — MPLS physical port (color private1 on r1); mask /29 static
+    # vpn0_mpls_ifname: GigabitEthernet0/0/1
+    vpn0_mpls_ifname: GigabitEthernet2
+    vpn0_mpls_ip: 172.16.2.30
+    vpn0_mpls_mask: 255.255.255.0
+    vpn0_mpls_bw_down: '100000'
+    vpn0_mpls_shape: '100000'
+    vpn0_mpls_color: private1
+    vpn0_mpls_pref: '200'
+    vpn0_mpls_shutdown: 'false'   # MPLS link is live on router1
+    vpn0_mpls_desc: BXT MPLS 1   # port description
+
+    # TLOC-EXT — parent physical cross-connect (GE0/0/3, no IP)
+    # tloc_ext_parent_ifname: GigabitEthernet0/0/3
+    tloc_ext_parent_ifname: GigabitEthernet4
+    tloc_ext_parent_shutdown: 'false'
+    tloc_ext_parent_desc: '*** Private PARENT TLOC-EXT ***'   # port description
+
+    # TLOC-EXT — relay sub-if (.991 relays private1 toward router2); /30
+    # tloc_ext_relay_ifname: GigabitEthernet0/0/3.991
+    tloc_ext_relay_ifname: GigabitEthernet4.991
+    tloc_ext_relay_ip: 172.25.4.1
+    tloc_ext_relay_mask: 255.255.255.252
+    tloc_ext_relay_shutdown: 'false'
+    # tloc_ext_relay_parent: GigabitEthernet0/0/1  # physical MPLS port extended
+    tloc_ext_relay_parent: GigabitEthernet2  # physical MPLS port extended
+    tloc_ext_relay_desc: 'Private 1 TLOC-EXT Relay FOR SD-WAN02'
+
+    # TLOC-EXT — tunnel sub-if (.992 presents private2 on router1); /30
+    # tloc_ext_tunnel_ifname: GigabitEthernet0/0/3.992
+    tloc_ext_tunnel_ifname: GigabitEthernet4.992
+    tloc_ext_tunnel_ip: 172.25.5.1
+    tloc_ext_tunnel_mask: 255.255.255.252
+    tloc_ext_tunnel_desc: 'Private 2 TLOC-EXT SD-WAN01 VIA SWD02'  # port description
+    tloc_ext_tunnel_bw_down: '100000'
+    tloc_ext_tunnel_shape: '100000'
+    tloc_ext_tunnel_color: private2
+    tloc_ext_tunnel_pref: '200'
+    tloc_ext_tunnel_shutdown: 'false'
+
+    # VPN 10 — BGP toward SDA fabric
+    bgp_as_number: '10.10'       
+    bgp_router_id: 10.3.3.1      
+    bgp_neighbor_remote_as: '65537'  # confirmed SDA neighbor AS, 2026-07-27
+    bgp_neighbor_corp: 10.3.60.6   # bgp_neighbor_address_SDA_INFRA
+    bgp_neighbor_infra: 10.3.60.2 # bgp_neighbor_address_SDA_CORP
+    cli_bgp_as: '10.10'
+    cli_neighbor_corp: 10.3.60.6   # bgp_neighbor_address_SDA_INFRA
+    cli_neighbor_infra: 10.3.60.2 # bgp_neighbor_address_SDA_CORP
+
+    # VPN 10 — Loopback10 (/32)
+    loopback10_ip: 10.3.3.1
+    loopback10_mask: 255.255.255.255
+    loopback10_shutdown: 'false'
+
+    # VPN 10 — SVI VLAN 253 (PnP bootstrap; per-router /29)
+    vlan253_ip: 10.3.253.1
+    vlan253_mask: 255.255.255.248
+    vlan253_dhcp_pool: 10.3.253.0
+    vlan253_dhcp_gw: 10.3.253.1
+    vlan253_dhcp_mask: 255.255.255.248
+    vlan253_desc: BXT PnP VLAN 253   # description
+
+    # VPN 10 — SVI VLAN 62 (user VLAN; VRRP pair, /24)
+    vlan62_ip: 10.3.62.252
+    vlan62_mask: 255.255.255.0
+    vlan62_vrrp_ip: 10.3.62.254  # VRRP virtual IP (same on both routers)
+    vlan62_dhcp_pool: 10.3.62.0
+    vlan62_dhcp_gw: 10.3.62.254
+    vlan62_dhcp_mask: 255.255.255.0
+    vlan62_desc: INT-SDA-DHCP    # description
+    # Routed subinterface on GigabitEthernet5 (shared parent port)
+    svi_vlan62_ifname: GigabitEthernet5.62
+    # VPN 10 — PnP VLAN 253 subinterface
+    svi_vlan253_ifname: GigabitEthernet5.253
+    
+    # VPN 10 — SDA fabric uplinks via routed subinterfaces (/30 each)
+    # INFRA VLAN 
+    svi_infra_ifname: GigabitEthernet5.3101
+    svi_infra_ip: 10.3.60.1
+    svi_infra_mask: 255.255.255.252
+    svi_infra_shutdown: 'false'
+    svi_infra_desc: INT-VLAN-BGP-INFRA  # CLI description
+    # CORP VLAN 
+    svi_corp_ifname: GigabitEthernet5.3103
+    svi_corp_ip: 10.3.60.5
+    svi_corp_mask: 255.255.255.252
+    svi_corp_shutdown: 'false'
+    svi_corp_desc: INT-VLAN-BGP-CORP  # CLI description
+
+  router2:
+    hostname: bxtdw02
+    system_ip: 10.0.0.4
+    site_id: 3
+    pseudo_commit_timer: 0  # config-group system variable; not a deploy gate
+    chassis_id: C8K-3188FA44-8A8A-8392-0E4B-0DA5A445C10B   # REQUIRED: real chassis/serial from vManage
+
+    port_offset: '1'
+    timezone: Europe/Zurich
+    gps_lat: '46.18948'
+    gps_lon: '6.11220'
+
+    # ThousandEyes values intentionally omitted; see router1 note above.
+
+    # VPN 0 — OSPF (underlay toward MPLS PE / TLOC-EXT cross-connect)
+    vpn0_ospf_router_id: 10.3.3.2
+    # vpn0_ospf_private_if: GigabitEthernet0/0/1     #MPLS-facing if
+    vpn0_ospf_private_if: GigabitEthernet2     #MPLS-facing if
+    # vpn0_ospf_tloc_if: GigabitEthernet0/0/3.992    #TLOC-EXT-facing if
+    vpn0_ospf_tloc_if: GigabitEthernet4.992   #TLOC-EXT-facing if
+
+    # VPN 0 — DNS (Internet-side resolvers)
+    vpn0_dns_primary: 172.16.1.254 
+    vpn0_dns_secondary: 172.16.2.254
+    
+    # VPN 0 — default-route next-hops (one per upstream; MPLS is active on BXT branch-a)
+    vpn0_gw_inet1: 172.16.1.254  # ISP1 gateway
+    vpn0_gw_inet2: 172.16.3.254  # ISP2 gateway
+    vpn0_gw_mpls1: 172.16.2.254   # MPLS 1 next-hop
+    vpn0_gw_mpls2: 172.25.4.1  # MPLS 2 next-hop (via TLOC-EXT relay)
+
+
+    # vpn0_inet1_ifname: GigabitEthernet0/0/0
+    vpn0_inet1_ifname: GigabitEthernet1
+    vpn0_inet1_ip: 172.16.1.31
+    vpn0_inet1_mask: 255.255.255.0 #not decimal
+    vpn0_inet1_bw_down: '100000'
+    vpn0_inet1_shape: '100000'
+    vpn0_inet1_color: custom1
+    vpn0_inet1_pref: '100'        # lower preference on secondary router
+    vpn0_inet1_shutdown: 'false'
+    vpn0_inet1_desc: BXT INTERNET 1   # port description
+
+    # vpn0_inet2_ifname: GigabitEthernet0/0/2
+    vpn0_inet2_ifname: GigabitEthernet3
+    vpn0_inet2_ip: 172.16.3.31
+    vpn0_inet2_mask: 255.255.255.0
+    vpn0_inet2_bw_down: '100000'
+    vpn0_inet2_shape: '100000'
+    vpn0_inet2_color: custom2
+    vpn0_inet2_pref: '100'
+    vpn0_inet2_shutdown: 'false'
+    vpn0_inet2_desc: BXT INTERNET 2   # port description
+
+    # MPLS port shut on router2 (private2 arrives via TLOC-EXT relay from r1)
+    # vpn0_mpls_ifname: GigabitEthernet0/0/1
+    vpn0_mpls_ifname: GigabitEthernet2
+    vpn0_mpls_ip: 172.16.2.31
+    vpn0_mpls_mask: 255.255.255.0
+    vpn0_mpls_bw_down: '100000'
+    vpn0_mpls_shape: '100000'
+    vpn0_mpls_color: private1
+    vpn0_mpls_pref: '100'
+    vpn0_mpls_shutdown: 'false'
+    vpn0_mpls_desc: BXT MPLS   # port description
+
+    # tloc_ext_parent_ifname: GigabitEthernet0/0/3
+    tloc_ext_parent_ifname: GigabitEthernet4
+    tloc_ext_parent_shutdown: 'false'
+    tloc_ext_parent_desc: '*** Private PARENT TLOC-EXT ***'  # port description
+
+    # .992 on router2 relays private2 toward router1
+    # tloc_ext_relay_ifname: GigabitEthernet0/0/3.992
+    tloc_ext_relay_ifname: GigabitEthernet4.992
+    tloc_ext_relay_ip: 172.25.5.2
+    tloc_ext_relay_mask: 255.255.255.252
+    tloc_ext_relay_shutdown: 'false'
+    # tloc_ext_relay_parent: GigabitEthernet0/0/1
+    tloc_ext_relay_parent: GigabitEthernet2
+    tloc_ext_relay_desc: 'Private 1 TLOC-EXT Relay FOR SD-WAN02'  # port description
+
+    # .991 on router2 presents private1 to the fabric via router1's MPLS
+    # tloc_ext_tunnel_ifname: GigabitEthernet0/0/3.991
+    tloc_ext_tunnel_ifname: GigabitEthernet4.991
+    tloc_ext_tunnel_ip: 172.25.4.2
+    tloc_ext_tunnel_mask: 255.255.255.252
+    tloc_ext_tunnel_desc: 'Private 1 TLOC-EXT SD-WAN02 VIA SWD01'  # port description
+    tloc_ext_tunnel_bw_down: '100000'
+    tloc_ext_tunnel_shape: '100000'
+    tloc_ext_tunnel_color: private2
+    tloc_ext_tunnel_pref: '100'
+    tloc_ext_tunnel_shutdown: 'false'
+
+    # VPN 10 — BGP toward SDA fabric
+    bgp_as_number: '10.10'       
+    bgp_router_id: 10.3.3.2     
+    bgp_neighbor_remote_as: '65537'  # confirmed SDA neighbor AS, 2026-07-27
+    bgp_neighbor_corp: 10.3.60.10   # bgp_neighbor_address_SDA_INFRA
+    bgp_neighbor_infra: 10.3.60.14  # bgp_neighbor_address_SDA_CORP
+    cli_bgp_as: '10.10'
+    cli_neighbor_corp: 10.3.60.10   # bgp_neighbor_address_SDA_INFRA
+    cli_neighbor_infra: 10.3.60.14  # bgp_neighbor_address_SDA_CORP
+
+    # VPN 10 — Loopback10 (/32)
+    loopback10_ip: 10.3.3.2
+    loopback10_mask: 255.255.255.255
+    loopback10_shutdown: 'false'
+
+    vlan253_ip: 10.3.253.9
+    vlan253_mask: 255.255.255.248
+    vlan253_dhcp_pool: 10.3.253.8
+    vlan253_dhcp_gw: 10.3.253.9
+    vlan253_dhcp_mask: 255.255.255.248
+    vlan253_desc: INT-FOR-OPENGEAR    # CLI description
+
+    vlan62_ip: 10.3.62.253
+    vlan62_mask: 255.255.255.0
+    vlan62_vrrp_ip: 10.3.62.254
+    vlan62_dhcp_pool: 10.3.62.0
+    vlan62_dhcp_gw: 10.3.62.254
+    vlan62_dhcp_mask: 255.255.255.0
+    vlan62_desc: INT-SDA-DHCP         # CLI description
+    svi_vlan62_ifname: GigabitEthernet5.62
+
+    svi_vlan253_ifname: GigabitEthernet5.253
+
+    svi_corp_ifname: GigabitEthernet5.3111
+    svi_corp_ip: 10.3.60.9
+    svi_corp_mask: 255.255.255.252
+    svi_corp_shutdown: 'false'
+    svi_corp_desc: INT-VLAN-BGP-CORP  # CLI description
+    svi_infra_ifname: GigabitEthernet5.3113
+    svi_infra_ip: 10.3.60.13
+    svi_infra_mask: 255.255.255.252
+    svi_infra_shutdown: 'false'
+    svi_infra_desc: INT-VLAN-BGP-INFRA  # CLI description
+
+

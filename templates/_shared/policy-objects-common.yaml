@@ -1,4 +1,4 @@
-# templates/_shared/policy-objects-common.yaml
+# templates/_shared/policy-objects.yaml
 #
 # Policy objects ("Groups of Interest") that are IDENTICAL for every site and
 # every variant.  Added 2026-09-02 when the UX1 data policies were migrated:
@@ -10,7 +10,7 @@
 # before reading it (netascode utils_yaml_merge: dicts merge recursively, lists
 # of dicts merge by `name`).  So `feature_profiles.policy_object_profile` may be
 # assembled from several files:
-#     _shared/policy-objects-common.yaml   profile name + fabric-wide objects  (here)
+#     _shared/policy-objects.yaml   profile name + fabric-wide objects  (here)
 #     dc/policy-objects.yaml        DC-only forwarding class (LO_VIDEO, queue 1)
 #     branch/policy-objects.yaml    branch-only prefix list (LO_BB_PFX)
 # validate_model.py check 6 re-does that merge and verifies every reference
@@ -42,7 +42,7 @@ sdwan:
 
       # ── Forwarding classes (UX2 class maps) ─────────────────────────────────
       # The seven classes referenced by the QoS classification traffic policy
-      # (TRAFFIC-__SITE__ in values/aar/<site>.yaml).  Queue numbers
+      # (QOSCLASS-__SITE__ in _shared/application-priority.yaml).  Queue numbers
       # come from the UX1 `class` policy lists and are IDENTICAL fabric-wide;
       # only the bandwidth split per queue differs between DC and branch, and
       # that lives in the per-variant qos_policies.
